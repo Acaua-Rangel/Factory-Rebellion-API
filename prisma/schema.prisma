@@ -15,11 +15,11 @@ datasource db {
 }
 
 model User {
-  user_id String  @id @default(uuid())
-  username String
-  password String
-  salt Int
-  createdAt DateTime @default(now())
+  user_id   String    @id @default(uuid())
+  username  String    @unique
+  password  String
+  salt      String
+  createdAt DateTime  @default(now())
   updatedAt DateTime?
   deletedAt DateTime?
 }
