@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import aesjs from 'aes-js';
+import * as aesjs from 'aes-js';
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
