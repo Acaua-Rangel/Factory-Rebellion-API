@@ -658,6 +658,87 @@ describe('Combat', () => {
     });
   });
 
+  describe('holding interact with nobody to revive', () => {
+    type Seen = {
+      playerId: string;
+      role: string;
+      reach: { left: number; right: number; top: number; bottom: number };
+    };
+    const listen = () => {
+      const seen: Seen[] = [];
+      combat.onInteract((e) => seen.push(e));
+      return seen;
+    };
+
+    it('AC-067: it is announced with the player and their reach, so the Owner can repair @spec:AC-067', () => {
+      isolate(owner());
+      place(owner(), 800, 1);
+      const seen = listen();
+
+      combat.act(owner(), hold());
+
+      expect(seen).toEqual([
+        {
+          playerId: owner(),
+          role: 'owner',
+          reach: {
+            left: 772 - 56,
+            right: 827 + 56,
+            top: 840 - 16,
+            bottom: 959 + 16,
+          },
+        },
+      ]);
+    });
+
+    it('AC-067: every frame the key is held counts, so repairing goes on while it is @spec:AC-067', () => {
+      isolate(owner());
+      place(owner(), 800, 1);
+      const seen = listen();
+
+      for (let i = 0; i < 5; i++) combat.act(owner(), hold(i + 1));
+
+      expect(seen).toHaveLength(5);
+    });
+
+    it('AC-067: without the key held, or on an attack, nothing is announced @spec:AC-067', () => {
+      isolate(owner());
+      place(owner(), 800, 1);
+      const seen = listen();
+
+      combat.act(owner(), idle());
+      combat.act(owner(), { ...hold(2), attack: true });
+      combat.act(owner(), undefined);
+
+      expect(seen).toEqual([]);
+    });
+
+    it('AC-068: reviving a downed teammate has priority: then it is not announced @spec:AC-068', () => {
+      const helper = policemen()[0];
+      isolate(owner(), helper);
+      place(owner(), 800, 1);
+      place(helper, 830, 1);
+      match.damage(helper, MAX_LIFE);
+      const seen = listen();
+
+      combat.act(owner(), hold());
+
+      expect(seen).toEqual([]);
+      expect(combat.reviveProgress(helper)).toBeGreaterThan(0);
+    });
+
+    it('a downed player holding interact announces nothing', () => {
+      isolate(owner());
+      place(owner(), 800, 1);
+      match.damage(owner(), MAX_LIFE);
+      const seen = listen();
+
+      combat.act(owner(), hold());
+
+      expect(seen).toEqual([]);
+    });
+  });
+
   describe('what the others see', () => {
     it('after a melee attack the attacker shows the hit animation for a short while', () => {
       const w = workers()[0];

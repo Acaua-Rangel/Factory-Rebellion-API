@@ -163,6 +163,8 @@ export function buildMap(input: ExportInput): GameMap {
         id: `machine${machines.length + 1}`,
         object: instance.object,
         collider: collider.id,
+        x: instance.x,
+        y: instance.y,
       });
     }
   }

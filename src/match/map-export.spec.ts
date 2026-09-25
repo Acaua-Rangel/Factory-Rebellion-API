@@ -262,6 +262,15 @@ describe('Map export', () => {
     });
   });
 
+  it('AC-051: each machine carries the position of its room instance, so the client can match its own objects to server ids @spec:AC-051', () => {
+    const m = map();
+
+    expect(m.machines.map((x) => [x.id, x.x, x.y])).toEqual([
+      ['machine1', 1382, 796],
+      ['machine2', 813, 300],
+    ]);
+  });
+
   it('AC-061: machines are listed in room order with stable ids and point to their collider @spec:AC-061', () => {
     const m = map();
 
@@ -333,6 +342,15 @@ describe('The exported Multiplayer1 map', () => {
       obj_maquina2: 1,
       obj_maquina3: 2,
     });
+  });
+
+  it('AC-051: every machine of the real map has a position inside the room @spec:AC-051', () => {
+    for (const machine of map.machines) {
+      expect(machine.x).toBeGreaterThan(0);
+      expect(machine.x).toBeLessThan(map.width);
+      expect(machine.y).toBeGreaterThan(0);
+      expect(machine.y).toBeLessThan(map.height);
+    }
   });
 
   it('AC-061: has 4 spawn points per team, inside the room, with workers low-left and capatazes high-right @spec:AC-061', () => {

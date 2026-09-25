@@ -35,6 +35,15 @@ export interface MeleeEvent {
   rect: Rect;
 }
 
+// The player holds interact and there is nobody to revive: whatever else can
+// be done with the key (the Owner repairing a machine) happens here.
+export interface InteractEvent {
+  playerId: string;
+  role: Role;
+  // the box around the player that "within reach" means
+  reach: Rect;
+}
+
 interface Revive {
   target: string;
   frames: number;
@@ -53,6 +62,7 @@ export class Combat {
   private readonly revives = new Map<string, Revive>();
   private readonly hitUntil = new Map<string, number>();
   private readonly meleeListeners: ((event: MeleeEvent) => void)[] = [];
+  private readonly interactListeners: ((event: InteractEvent) => void)[] = [];
   private live: Bullet[] = [];
   private nextBullet = 1;
   private frameNo = 0;
@@ -69,6 +79,10 @@ export class Combat {
 
   onMelee(listener: (event: MeleeEvent) => void): void {
     this.meleeListeners.push(listener);
+  }
+
+  onInteract(listener: (event: InteractEvent) => void): void {
+    this.interactListeners.push(listener);
   }
 
   // 'hit' while a melee attack is fresh, so other players can show it.
@@ -270,6 +284,10 @@ export class Combat {
     });
     if (!target) {
       this.cancel(reviver.sessionId);
+      // nobody to get up: the key may do something else (repairing a machine)
+      for (const listener of this.interactListeners) {
+        listener({ playerId: reviver.sessionId, role: reviver.role, reach });
+      }
       return;
     }
 

@@ -406,37 +406,51 @@
     {
       "id": "machine1",
       "object": "obj_maquina1",
-      "collider": "c8"
+      "collider": "c8",
+      "x": 813,
+      "y": 300
     },
     {
       "id": "machine2",
       "object": "obj_maquina3",
-      "collider": "c10"
+      "collider": "c10",
+      "x": 349,
+      "y": 356
     },
     {
       "id": "machine3",
       "object": "obj_maquina1",
-      "collider": "c11"
+      "collider": "c11",
+      "x": 1254,
+      "y": 300
     },
     {
       "id": "machine4",
       "object": "obj_maquina1",
-      "collider": "c13"
+      "collider": "c13",
+      "x": 1699,
+      "y": 300
     },
     {
       "id": "machine5",
       "object": "obj_maquina2",
-      "collider": "c16"
+      "collider": "c16",
+      "x": 1382,
+      "y": 796
     },
     {
       "id": "machine6",
       "object": "obj_maquina3",
-      "collider": "c18"
+      "collider": "c18",
+      "x": 348,
+      "y": 852
     },
     {
       "id": "machine7",
       "object": "obj_maquina1",
-      "collider": "c20"
+      "collider": "c20",
+      "x": 812,
+      "y": 796
     }
   ],
   "spawns": {

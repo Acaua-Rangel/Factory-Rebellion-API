@@ -30,6 +30,10 @@ export interface MapMachine {
   object: string;
   // the collider that is this machine's body
   collider: string;
+  // where the room places it, so the client can match its own machine
+  // objects (by position) to this id
+  x: number;
+  y: number;
 }
 
 export interface GameMap {
