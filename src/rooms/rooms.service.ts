@@ -174,6 +174,45 @@ export class RoomsService {
     return room;
   }
 
+  // The host removes a member from the lobby and bans them from this room
+  // (AC-073, AC-074). The ban lasts as long as the room exists (ASM-028).
+  kick(hostSessionId: string, targetSessionId: string): void {
+    const room = this.hostRoom(hostSessionId, 'only_host_can_kick');
+    if (room.phase !== 'lobby') {
+      throw new RoomError('not_in_lobby');
+    }
+    if (targetSessionId === hostSessionId) {
+      throw new RoomError('cannot_kick_yourself');
+    }
+    if (!this.member(room, targetSessionId)) {
+      throw new RoomError('member_not_found');
+    }
+
+    room.banned.add(targetSessionId);
+    this.removeMember(targetSessionId);
+    this.emit({
+      type: 'kicked',
+      code: room.code,
+      sessionId: targetSessionId,
+    });
+  }
+
+  // A connection dropped or came back: the seat is kept either way (AC-032).
+  setConnected(sessionId: string, connected: boolean): void {
+    const room = this.roomOf(sessionId);
+    const member = room && this.member(room, sessionId);
+    if (!room || !member || member.connected === connected) {
+      return;
+    }
+    member.connected = connected;
+    this.emit({ type: 'updated', room: this.viewOf(room) });
+  }
+
+  // The 60 s reconnect window ended: free the seat, whatever the room's phase.
+  removeSession(sessionId: string): void {
+    this.removeMember(sessionId);
+  }
+
   // The room of a player who must be its host (or the error to raise).
   private hostRoom(
     sessionId: string,
