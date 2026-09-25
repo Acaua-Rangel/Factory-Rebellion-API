@@ -682,6 +682,23 @@ describe('MatchService', () => {
       expect(matches.getCombat(code)!.bullets).toEqual([]);
     });
 
+    it('AC-053: a bullet still in flight when the round ends does not carry over to the next one @spec:AC-053', () => {
+      const owner = ownerId();
+      put(owner, 1500, 896, -1); // shooting into open space: nothing to hit
+      players()
+        .filter((p) => p.sessionId !== owner)
+        .forEach((p, i) => put(p.sessionId, 1900 - i * 70, 400));
+      matches.enqueueInput(owner, { inputs: [{ seq: 1, a: 1 }] });
+      run(3);
+      expect(matches.getCombat(code)!.bullets).toHaveLength(1);
+
+      matches.tick(ROUND_MS); // the round ends by the clock
+      matches.tick(INTERMISSION_MS); // and the next one starts
+
+      expect(matches.getMatch(code)!.view().round).toBe(2);
+      expect(matches.getCombat(code)!.bullets).toEqual([]);
+    });
+
     it("AC-055: a downed player's inputs are still acknowledged, so the client does not pile them up @spec:AC-055", () => {
       const victim = someoneOf('workers').sessionId;
       matches.getMatch(code)!.damage(victim, 6);
