@@ -1,0 +1,480 @@
+{
+  "name": "Multiplayer1",
+  "width": 2048,
+  "height": 1024,
+  "playerMask": {
+    "left": -28,
+    "right": 27,
+    "top": -56,
+    "bottom": 63
+  },
+  "colliders": [
+    {
+      "id": "c1",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 742,
+        "right": 785,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c2",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 132,
+        "right": 175,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c3",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 437,
+        "right": 480,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c4",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1353,
+        "right": 1396,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c5",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1048,
+        "right": 1091,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c6",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1964,
+        "right": 2007,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c7",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1659,
+        "right": 1702,
+        "top": 148,
+        "bottom": 155
+      },
+      "idleEdge": 148
+    },
+    {
+      "id": "c8",
+      "object": "obj_maquina1",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 805,
+        "right": 948,
+        "top": 300,
+        "bottom": 463
+      },
+      "idleEdge": 300
+    },
+    {
+      "id": "c9",
+      "object": "obj_tampo",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 981,
+        "right": 1060,
+        "top": 404,
+        "bottom": 463
+      },
+      "idleEdge": 404
+    },
+    {
+      "id": "c10",
+      "object": "obj_maquina3",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 181,
+        "right": 496,
+        "top": 356,
+        "bottom": 463
+      },
+      "idleEdge": 356
+    },
+    {
+      "id": "c11",
+      "object": "obj_maquina1",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1246,
+        "right": 1389,
+        "top": 300,
+        "bottom": 463
+      },
+      "idleEdge": 300
+    },
+    {
+      "id": "c12",
+      "object": "obj_tampo",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1422,
+        "right": 1501,
+        "top": 404,
+        "bottom": 463
+      },
+      "idleEdge": 404
+    },
+    {
+      "id": "c13",
+      "object": "obj_maquina1",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1691,
+        "right": 1834,
+        "top": 300,
+        "bottom": 463
+      },
+      "idleEdge": 300
+    },
+    {
+      "id": "c14",
+      "object": "obj_tampo",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1867,
+        "right": 1946,
+        "top": 404,
+        "bottom": 463
+      },
+      "idleEdge": 404
+    },
+    {
+      "id": "c15",
+      "object": "obj_teto",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 0,
+        "right": 2048,
+        "top": 464,
+        "bottom": 479
+      },
+      "idleEdge": 464
+    },
+    {
+      "id": "c16",
+      "object": "obj_maquina2",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1378,
+        "right": 1813,
+        "top": 800,
+        "bottom": 959
+      },
+      "idleEdge": 796
+    },
+    {
+      "id": "c17",
+      "object": "obj_corda",
+      "kind": "oneway_bottom",
+      "rect": {
+        "left": 0,
+        "right": 2047,
+        "top": 732,
+        "bottom": 747
+      },
+      "idleEdge": 732
+    },
+    {
+      "id": "c18",
+      "object": "obj_maquina3",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 180,
+        "right": 495,
+        "top": 852,
+        "bottom": 959
+      },
+      "idleEdge": 852
+    },
+    {
+      "id": "c19",
+      "object": "obj_cadeira",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1841,
+        "right": 1928,
+        "top": 905,
+        "bottom": 959
+      },
+      "idleEdge": 905
+    },
+    {
+      "id": "c20",
+      "object": "obj_maquina1",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 804,
+        "right": 947,
+        "top": 796,
+        "bottom": 959
+      },
+      "idleEdge": 796
+    },
+    {
+      "id": "c21",
+      "object": "obj_tampo",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 980,
+        "right": 1059,
+        "top": 900,
+        "bottom": 959
+      },
+      "idleEdge": 900
+    },
+    {
+      "id": "c22",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 742,
+        "right": 785,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c23",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 132,
+        "right": 175,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c24",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 437,
+        "right": 480,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c25",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1353,
+        "right": 1396,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c26",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1048,
+        "right": 1091,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c27",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1964,
+        "right": 2007,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c28",
+      "object": "obj_luminaria",
+      "kind": "oneway_top",
+      "rect": {
+        "left": 1659,
+        "right": 1702,
+        "top": 612,
+        "bottom": 619
+      },
+      "idleEdge": 612
+    },
+    {
+      "id": "c29",
+      "object": "obj_wall",
+      "kind": "solid",
+      "rect": {
+        "left": -64,
+        "right": -1,
+        "top": -18,
+        "bottom": 991
+      }
+    },
+    {
+      "id": "c30",
+      "object": "obj_wall",
+      "kind": "solid",
+      "rect": {
+        "left": -8,
+        "right": 2053,
+        "top": -64,
+        "bottom": -1
+      }
+    },
+    {
+      "id": "c31",
+      "object": "obj_wall",
+      "kind": "solid",
+      "rect": {
+        "left": 2048,
+        "right": 2111,
+        "top": -4,
+        "bottom": 987
+      }
+    },
+    {
+      "id": "c32",
+      "object": "obj_chao",
+      "kind": "solid",
+      "rect": {
+        "left": 0,
+        "right": 2048,
+        "top": 960,
+        "bottom": 1083
+      }
+    },
+    {
+      "id": "c33",
+      "object": "obj_corda",
+      "kind": "oneway_bottom",
+      "rect": {
+        "left": 1,
+        "right": 2048,
+        "top": 236,
+        "bottom": 251
+      },
+      "idleEdge": 236
+    }
+  ],
+  "machines": [
+    {
+      "id": "machine1",
+      "object": "obj_maquina1",
+      "collider": "c8"
+    },
+    {
+      "id": "machine2",
+      "object": "obj_maquina3",
+      "collider": "c10"
+    },
+    {
+      "id": "machine3",
+      "object": "obj_maquina1",
+      "collider": "c11"
+    },
+    {
+      "id": "machine4",
+      "object": "obj_maquina1",
+      "collider": "c13"
+    },
+    {
+      "id": "machine5",
+      "object": "obj_maquina2",
+      "collider": "c16"
+    },
+    {
+      "id": "machine6",
+      "object": "obj_maquina3",
+      "collider": "c18"
+    },
+    {
+      "id": "machine7",
+      "object": "obj_maquina1",
+      "collider": "c20"
+    }
+  ],
+  "spawns": {
+    "workers": [
+      {
+        "x": 100,
+        "y": 896
+      },
+      {
+        "x": 160,
+        "y": 896
+      },
+      {
+        "x": 220,
+        "y": 896
+      },
+      {
+        "x": 280,
+        "y": 896
+      }
+    ],
+    "capatazes": [
+      {
+        "x": 2000,
+        "y": 400
+      },
+      {
+        "x": 1960,
+        "y": 400
+      },
+      {
+        "x": 1920,
+        "y": 400
+      },
+      {
+        "x": 1880,
+        "y": 400
+      }
+    ]
+  }
+}
