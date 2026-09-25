@@ -552,6 +552,206 @@ describe('Match messages over the WebSocket', () => {
       expect((await lastSnapshot(mine.client)).ack).toBe(1);
     });
 
+    describe('combat over the wire', () => {
+      const put = (
+        code: string,
+        id: string,
+        x: number,
+        y = 896,
+        facing: 1 | -1 = 1,
+      ) => {
+        const b = matches.getSimulation(code)!.bodyOf(id)!;
+        b.x = x;
+        b.y = y;
+        b.vspd = 0;
+        b.facing = facing;
+      };
+      const startRound = async () => {
+        const room = await startMatch();
+        matches.tick(START_MS);
+        run(2);
+        const view = room.started[0].d.view;
+        const byRole = (role: string) =>
+          view.players.find((p: any) => p.role === role).sessionId;
+        const client = (id: string) =>
+          room.all.find((p) => p.session.sessionId === id)!;
+        return { ...room, view, byRole, client };
+      };
+      const tuckAway = (code: string, view: any, keep: string[]) => {
+        view.players
+          .filter((p: any) => !keep.includes(p.sessionId))
+          .forEach((p: any, i: number) =>
+            put(code, p.sessionId, 200 + i * 80, 400),
+          );
+      };
+
+      it('AC-056: the Owner sends "attack" and the bullet appears in everybody\'s snapshots @spec:AC-056', async () => {
+        const { all, code, byRole, client } = await startRound();
+        const owner = byRole('owner');
+        put(code, owner, 1000, 896, 1);
+        for (const { client: c } of all) c.messages.length = 0;
+
+        client(owner).client.send({
+          t: 'input',
+          d: { inputs: [{ seq: 1, a: 1 }] },
+        });
+        await sleep(50);
+        run(9);
+        await sleep(80);
+
+        for (const { client: c } of all) {
+          const withBullet = c.messages.filter(
+            (m) => m.t === 'match.snapshot' && m.d.bullets.length > 0,
+          );
+          expect(withBullet.length).toBeGreaterThan(0);
+          expect(withBullet[0].d.bullets[0]).toMatchObject({ d: 1 });
+        }
+      });
+
+      it('AC-056: "attack" from a Policeman or an Operário creates no bullet @spec:AC-056', async () => {
+        const { all, code, view, client } = await startRound();
+        const others = view.players
+          .filter((p: any) => p.role !== 'owner')
+          .map((p: any) => p.sessionId);
+        others.forEach((id: string, i: number) =>
+          put(code, id, 1000 + i * 200),
+        );
+        for (const { client: c } of all) c.messages.length = 0;
+
+        for (const id of others)
+          client(id).client.send({
+            t: 'input',
+            d: { inputs: [{ seq: 1, a: 1 }] },
+          });
+        await sleep(50);
+        run(9);
+        await sleep(80);
+
+        const bullets = all[0].client.messages
+          .filter((m) => m.t === 'match.snapshot')
+          .flatMap((m) => m.d.bullets);
+        expect(bullets).toEqual([]);
+      });
+
+      it('AC-058: a hit is judged by the server and the new life reaches every player @spec:AC-058', async () => {
+        const { all, code, view, byRole, client } = await startRound();
+        const owner = byRole('owner');
+        const victim = view.players.find(
+          (p: any) => p.team === 'workers',
+        ).sessionId;
+        tuckAway(code, view, [owner, victim]);
+        put(code, owner, 1000, 896, 1);
+        put(code, victim, 1100);
+
+        client(owner).client.send({
+          t: 'input',
+          d: { inputs: [{ seq: 1, a: 1 }] },
+        });
+        await sleep(50);
+        run(20);
+        await sleep(80);
+
+        for (const { client: c } of all) {
+          const last = c.messages
+            .filter((m) => m.t === 'match.snapshot')
+            .at(-1)!.d;
+          expect(last.players.find((p: any) => p.id === victim).life).toBe(5);
+        }
+      });
+
+      it('AC-058: a client that reports damage, life or hits by itself is ignored @spec:AC-058', async () => {
+        const { code, view, client } = await startRound();
+        const cheater = view.players.find(
+          (p: any) => p.team === 'workers',
+        ).sessionId;
+        const target = view.players.find(
+          (p: any) => p.team === 'capatazes',
+        ).sessionId;
+        const before = JSON.stringify(
+          matches
+            .getMatch(code)!
+            .view()
+            .players.map((p) => [p.sessionId, p.life, p.status]),
+        );
+
+        const forged = [
+          {
+            t: 'input',
+            d: {
+              inputs: [
+                {
+                  seq: 1,
+                  a: 1,
+                  damage: 999,
+                  life: 0,
+                  target,
+                  hit: target,
+                  kill: target,
+                },
+              ],
+              damage: 999,
+              target,
+            },
+          },
+          { t: 'combat.hit', d: { target, damage: 6 } },
+          { t: 'player.damage', d: { id: target, amount: 6 } },
+          { t: 'match.damage', d: { id: target, amount: 6 } },
+          { t: 'player.life', d: { life: 0 } },
+          { t: 'bullet.hit', d: { target } },
+          { t: 'match.revive', d: { id: target } },
+        ];
+        for (const message of forged) client(cheater).client.send(message);
+        await sleep(80);
+        run(5);
+
+        const errors = client(cheater).client.messages.filter(
+          (m) => m.t === 'error' && m.d.code === 'bad_message',
+        );
+        expect(errors).toHaveLength(forged.length - 1); // only the real input is understood
+        const after = JSON.stringify(
+          matches
+            .getMatch(code)!
+            .view()
+            .players.map((p) => [p.sessionId, p.life, p.status]),
+        );
+        expect(after).toBe(before); // an attack input with nobody in reach hurts nobody
+      });
+
+      it('AC-069: holding the interact key over the wire revives a downed teammate @spec:AC-069', async () => {
+        const { code, view, client } = await startRound();
+        const capatazes = view.players
+          .filter((p: any) => p.team === 'capatazes')
+          .map((p: any) => p.sessionId);
+        const [downed, helper] = capatazes;
+        tuckAway(code, view, [downed, helper]);
+        put(code, downed, 1000);
+        put(code, helper, 1030);
+        matches.getMatch(code)!.damage(downed, 6);
+        run(2);
+
+        let seq = 0;
+        for (let block = 0; block < 6; block++) {
+          client(helper).client.send({
+            t: 'input',
+            d: {
+              inputs: Array.from({ length: 30 }, () => ({ seq: ++seq, e: 1 })),
+            },
+          });
+          await sleep(30);
+          run(30);
+        }
+        run(6); // snapshots go out every 3rd frame: let one show the final state
+        await sleep(80);
+
+        const last = client(helper)
+          .client.messages.filter((m) => m.t === 'match.snapshot')
+          .at(-1)!.d;
+        const revived = last.players.find((p: any) => p.id === downed);
+        expect(revived.status).toBe('active');
+        expect(revived.life).toBe(2);
+      });
+    });
+
     it('AC-005: snapshots never carry a session token @spec:AC-005 @principle:P-005', async () => {
       const { all } = await startMatch();
       matches.tick(START_MS);
