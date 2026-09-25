@@ -84,6 +84,9 @@ describe('Match messages over the WebSocket', () => {
     ]));
     sessions = app.get(SessionService);
     matches = app.get(MatchService);
+    // the tests drive time by hand with matches.tick(); the real 60 Hz loop
+    // would add frames of its own while they sleep
+    matches.onModuleDestroy();
   });
 
   afterEach(async () => {
@@ -346,6 +349,221 @@ describe('Match messages over the WebSocket', () => {
     const answered = await cheater.next('match.state');
     expect(answered.d.view.score).toEqual({ workers: 0, capatazes: 0 });
     expect(withoutClock()).toEqual(before);
+  });
+
+  describe('movement over the wire', () => {
+    const FRAME = 1000 / 60;
+    const run = (frames: number) => {
+      for (let i = 0; i < frames; i++) matches.tick(FRAME);
+    };
+    // the latest snapshot a client received, optionally waiting for a condition
+    const lastSnapshot = async (
+      client: TestClient,
+      ok: (m: any) => boolean = () => true,
+    ) => {
+      await sleep(80);
+      const all = client.messages.filter(
+        (m) => m.t === 'match.snapshot' && ok(m.d),
+      );
+      return all.at(-1)?.d;
+    };
+    const me = (snap: any, id: string) =>
+      snap.players.find((p: any) => p.id === id);
+
+    it('AC-059: every member receives snapshots about 20 times a second while a round is on @spec:AC-059', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      for (const { client } of all) client.messages.length = 0;
+
+      run(60);
+      await sleep(100);
+
+      for (const { client } of all) {
+        const count = client.messages.filter(
+          (m) => m.t === 'match.snapshot',
+        ).length;
+        expect(count).toBeGreaterThanOrEqual(19);
+        expect(count).toBeLessThanOrEqual(21);
+      }
+    });
+
+    it('AC-059: a snapshot lists every player with position, facing, animation, life and state @spec:AC-059', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      run(10);
+
+      const snap = await lastSnapshot(all[0].client);
+
+      expect(snap.players).toHaveLength(4);
+      for (const p of snap.players) {
+        expect(Object.keys(p).sort()).toEqual([
+          'anim',
+          'id',
+          'life',
+          'status',
+          'x',
+          'xs',
+          'y',
+        ]);
+      }
+      expect(snap.machines).toHaveLength(7);
+      expect(snap.phase).toBe('round');
+    });
+
+    it('AC-061: sending "hold right" moves the player 240 px in a second, seen in the snapshots @spec:AC-061', async () => {
+      const { all, started } = await startMatch();
+      matches.tick(START_MS);
+      run(20);
+      // the team draw is random: take a worker, who spawns on the left with
+      // 240 px of free floor to the right (a capataz starts next to the right wall)
+      const workerId = started[0].d.view.players.find(
+        (p: any) => p.team === 'workers',
+      ).sessionId;
+      const mine = all.find((p) => p.session.sessionId === workerId)!;
+      const start = me(
+        await lastSnapshot(mine.client),
+        mine.session.sessionId,
+      ).x;
+
+      // 60 frames of "hold right" in two messages (the server reads at most 30
+      // inputs per message and keeps 30 waiting), then what a real client does
+      // when the key is released: an input with no keys. Without it the server
+      // would repeat the held keys for a few frames.
+      const held = (from: number) =>
+        Array.from({ length: 30 }, (_, i) => ({ seq: from + i, r: 1 }));
+      mine.client.send({ t: 'input', d: { inputs: held(1) } });
+      await sleep(30);
+      run(30);
+      mine.client.send({ t: 'input', d: { inputs: held(31) } });
+      await sleep(30);
+      run(30);
+      mine.client.send({ t: 'input', d: { inputs: [{ seq: 61 }] } });
+      await sleep(30);
+      run(1);
+      run(6); // let the next snapshots (every 3rd frame) catch up with the final position
+      const end = me(await lastSnapshot(mine.client), mine.session.sessionId).x;
+
+      expect(end - start).toBe(240);
+    });
+
+    it('AC-060: the snapshot tells each player the last input number applied for them @spec:AC-060', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      run(5);
+      const [a, b] = [all[0], all[1]];
+
+      a.client.send({
+        t: 'input',
+        d: { inputs: [{ seq: 1, r: 1 }, { seq: 2, r: 1 }, { seq: 3 }] },
+      });
+      b.client.send({ t: 'input', d: { inputs: [{ seq: 1 }] } });
+      await sleep(50);
+      run(6);
+
+      expect((await lastSnapshot(a.client)).ack).toBe(3);
+      expect((await lastSnapshot(b.client)).ack).toBe(1);
+    });
+
+    it('AC-062: a position claimed by the client is ignored, over the wire @spec:AC-062', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      run(20);
+      const cheater = all[2];
+      const before = me(
+        await lastSnapshot(cheater.client),
+        cheater.session.sessionId,
+      );
+
+      cheater.client.send({
+        t: 'input',
+        d: {
+          inputs: [{ seq: 1, x: 12, y: 34, hspd: 900 }],
+          x: 5,
+          y: 5,
+          position: { x: 1, y: 1 },
+        },
+      });
+      cheater.client.send({ t: 'match.position', d: { x: 12, y: 34 } });
+      await sleep(50);
+      run(6);
+      const after = me(
+        await lastSnapshot(cheater.client),
+        cheater.session.sessionId,
+      );
+
+      expect(after.x).toBe(before.x);
+      expect(after.y).toBeCloseTo(before.y, 1);
+      expect(
+        cheater.client.messages.some(
+          (m) => m.t === 'error' && m.d.code === 'bad_message',
+        ),
+      ).toBe(true);
+    });
+
+    it('AC-062: sending far more inputs than time has passed does not make a player faster @spec:AC-062', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      run(20);
+      const mine = all[3];
+      const start = me(
+        await lastSnapshot(mine.client),
+        mine.session.sessionId,
+      ).x;
+
+      for (let batch = 0; batch < 8; batch++) {
+        mine.client.send({
+          t: 'input',
+          d: {
+            inputs: Array.from({ length: 30 }, (_, i) => ({
+              seq: batch * 30 + i + 1,
+              r: 1,
+            })),
+          },
+        });
+      }
+      await sleep(80);
+      run(30);
+      const end = me(await lastSnapshot(mine.client), mine.session.sessionId).x;
+
+      expect(end - start).toBeLessThanOrEqual(30 * 4);
+    });
+
+    it('match.sync restarts the input numbering of a client that reloaded', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      const mine = all[0];
+      mine.client.send({
+        t: 'input',
+        d: { inputs: [{ seq: 1 }, { seq: 2 }, { seq: 3 }] },
+      });
+      await sleep(40);
+      run(5);
+      expect((await lastSnapshot(mine.client)).ack).toBe(3);
+
+      mine.client.send({ t: 'match.sync' });
+      await sleep(40);
+      mine.client.send({ t: 'input', d: { inputs: [{ seq: 1, r: 1 }] } });
+      await sleep(40);
+      run(6);
+
+      expect((await lastSnapshot(mine.client)).ack).toBe(1);
+    });
+
+    it('AC-005: snapshots never carry a session token @spec:AC-005 @principle:P-005', async () => {
+      const { all } = await startMatch();
+      matches.tick(START_MS);
+      run(30);
+      await sleep(80);
+
+      const snapshots = clients.flatMap((c) =>
+        c.messages.filter((m) => m.t === 'match.snapshot'),
+      );
+      expect(snapshots.length).toBeGreaterThan(0);
+      for (const token of tokens) {
+        expect(JSON.stringify(snapshots)).not.toContain(token);
+      }
+      expect(all).toHaveLength(4);
+    });
   });
 
   it('AC-005: no message of the whole match ever carries a session token @spec:AC-005 @principle:P-005', async () => {
