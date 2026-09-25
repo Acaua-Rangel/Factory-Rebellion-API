@@ -146,6 +146,11 @@ export class Match {
     return this.players.map((p) => p.sessionId);
   }
 
+  // Machines only wear down and get repaired in a normal round (AC-044).
+  get inRound(): boolean {
+    return this.phase === 'round';
+  }
+
   get inSuddenDeath(): boolean {
     return this.phase === 'sudden_death';
   }
