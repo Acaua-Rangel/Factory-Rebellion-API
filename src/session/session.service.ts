@@ -13,9 +13,20 @@ export interface PublicSession {
   nickname: string;
 }
 
+export type ResumeResult =
+  | { status: 'resumed'; session: Session }
+  | { status: 'expired' };
+
+// How long a dropped player keeps their identity (and, later, their seat).
+export const RECONNECT_GRACE_MS = 60_000;
+
 @Injectable()
 export class SessionService {
+  // Injectable clock so tests don't have to wait 60 real seconds.
+  clock: () => number = () => Date.now();
+
   private readonly sessionsByToken = new Map<string, Session>();
+  private readonly disconnectedAt = new Map<string, number>();
 
   create(nickname: string): Session {
     const session: Session = {
@@ -37,5 +48,49 @@ export class SessionService {
 
   count(): number {
     return this.sessionsByToken.size;
+  }
+
+  // Called by the realtime gateway when a socket dies or goes silent.
+  markDisconnected(token: string): void {
+    if (this.sessionsByToken.has(token) && !this.disconnectedAt.has(token)) {
+      this.disconnectedAt.set(token, this.clock());
+    }
+  }
+
+  // Called by the realtime gateway on "hello" (also for the first connection).
+  resume(token: string): ResumeResult {
+    const session = this.sessionsByToken.get(token);
+    if (!session) {
+      return { status: 'expired' };
+    }
+    const droppedAt = this.disconnectedAt.get(token);
+    if (droppedAt !== undefined && this.clock() - droppedAt > RECONNECT_GRACE_MS) {
+      this.remove(token);
+      return { status: 'expired' };
+    }
+    this.disconnectedAt.delete(token);
+    return { status: 'resumed', session };
+  }
+
+  // Removes every session whose grace period is over; returns their public ids
+  // so rooms can free the seats.
+  purgeExpired(): string[] {
+    const now = this.clock();
+    const removed: string[] = [];
+    for (const [token, droppedAt] of this.disconnectedAt) {
+      if (now - droppedAt > RECONNECT_GRACE_MS) {
+        const session = this.sessionsByToken.get(token);
+        if (session) {
+          removed.push(session.sessionId);
+        }
+        this.remove(token);
+      }
+    }
+    return removed;
+  }
+
+  private remove(token: string): void {
+    this.sessionsByToken.delete(token);
+    this.disconnectedAt.delete(token);
   }
 }
