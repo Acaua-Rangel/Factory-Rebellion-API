@@ -15,6 +15,7 @@ import {
 } from './match-state';
 import { GameMap, loadMap } from './map';
 import { Combat } from './combat';
+import { Machines } from './machines';
 import { Physics } from './physics';
 import { Simulation } from './simulation';
 import { Snapshot, buildSnapshot } from './snapshot';
@@ -23,6 +24,8 @@ import { Snapshot, buildSnapshot } from './snapshot';
 export type MatchServiceEvent =
   | MatchEvent
   | { type: 'started'; view: MatchView }
+  // an Operário's hit just broke this machine
+  | { type: 'machine_broken'; id: string }
   // the world 20 times a second, plus each player's last applied input number
   | { type: 'snapshot'; snapshot: Snapshot; acks: Record<string, number> };
 
@@ -53,6 +56,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
   private readonly matches = new Map<string, Match>();
   private readonly simulations = new Map<string, Simulation>();
   private readonly combats = new Map<string, Combat>();
+  private readonly machineSets = new Map<string, Machines>();
   private frameDebt = 0;
   private readonly listeners: ((
     code: string,
@@ -94,6 +98,21 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
 
   getCombat(code: string): Combat | undefined {
     return this.combats.get(code);
+  }
+
+  getMachines(code: string): Machines | undefined {
+    return this.machineSets.get(code);
+  }
+
+  // Where each machine is in the room, for clients to match their own machine
+  // objects to the ids used in snapshots.
+  machineSites(): { id: string; object: string; x: number; y: number }[] {
+    return this.gameMap.machines.map(({ id, object, x, y }) => ({
+      id,
+      object,
+      x,
+      y,
+    }));
   }
 
   // The match a player is currently in, for syncing after a reconnect.
@@ -142,6 +161,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
           this.matches.delete(code);
           this.simulations.delete(code);
           this.combats.delete(code);
+          this.machineSets.delete(code);
           this.rooms.returnToLobby(code);
         }
       }
@@ -176,6 +196,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
         sim.add(player.sessionId, player.position);
       }
       this.combats.get(code)?.resetRound();
+      this.machineSets.get(code)?.reset();
     } else if (event.type === 'player_left') {
       sim.remove(event.sessionId);
       this.combats.get(code)?.forget(event.sessionId);
@@ -215,7 +236,12 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
       }
       this.emit(code, {
         type: 'snapshot',
-        snapshot: buildSnapshot(match.view(), sim, combat),
+        snapshot: buildSnapshot(
+          match.view(),
+          sim,
+          combat,
+          this.machineSets.get(code),
+        ),
         acks,
       });
     }
@@ -243,7 +269,17 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
           sim.add(player.sessionId, player.position);
         }
         this.simulations.set(code, sim);
-        this.combats.set(code, new Combat(this.gameMap, match, sim));
+        const combat = new Combat(this.gameMap, match, sim);
+        const machines = new Machines(this.gameMap, match);
+        // an Operário's hit wears machines down; the Owner's held key mends
+        combat.onMelee((e) => machines.hit(e.rect, e.role));
+        combat.onInteract((e) => machines.repair(e.reach, e.role));
+        machines.onBroken((id) => {
+          match.machineBroken(id);
+          this.emit(code, { type: 'machine_broken', id });
+        });
+        this.combats.set(code, combat);
+        this.machineSets.set(code, machines);
         this.emit(code, { type: 'started', view: match.view() });
         break;
       }
@@ -270,6 +306,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
         this.matches.delete(event.code);
         this.simulations.delete(event.code);
         this.combats.delete(event.code);
+        this.machineSets.delete(event.code);
         break;
     }
   }

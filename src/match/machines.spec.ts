@@ -15,7 +15,10 @@ import {
 import { Role, Team } from './match.types';
 
 const map = loadMap();
-const roster = Array.from({ length: 8 }, (_, i) => ({ sessionId: `p${i + 1}`, nickname: `P${i + 1}` }));
+const roster = Array.from({ length: 8 }, (_, i) => ({
+  sessionId: `p${i + 1}`,
+  nickname: `P${i + 1}`,
+}));
 
 const rectOf = (machineId: string): Rect => {
   const machine = map.machines.find((m) => m.id === machineId)!;
@@ -32,7 +35,13 @@ describe('Machines', () => {
   let broken: string[];
 
   beforeEach(() => {
-    match = new Match({ roomCode: 'AAAA-AAAA', players: roster, rounds: 4, map: DEFAULT_MAP, draw: () => 0 });
+    match = new Match({
+      roomCode: 'AAAA-AAAA',
+      players: roster,
+      rounds: 4,
+      map: DEFAULT_MAP,
+      draw: () => 0,
+    });
     match.tick(START_MS);
     machines = new Machines(map, match);
     broken = [];
@@ -40,8 +49,13 @@ describe('Machines', () => {
   });
 
   const hp = (id = M) => machines.integrityOf(id);
-  const hit = (rect: Rect = rectOf(M), role: Role = 'worker') => machines.hit(rect, role);
-  const repairFrames = (n: number, rect: Rect = rectOf(M), role: Role = 'owner') => {
+  const hit = (rect: Rect = rectOf(M), role: Role = 'worker') =>
+    machines.hit(rect, role);
+  const repairFrames = (
+    n: number,
+    rect: Rect = rectOf(M),
+    role: Role = 'owner',
+  ) => {
     for (let i = 0; i < n; i++) machines.repair(rect, role);
   };
   const toSuddenDeath = () => {
@@ -120,17 +134,33 @@ describe('Machines', () => {
       expect(machines.list().every((m) => m.hp === 100)).toBe(true);
     });
 
-    it('AC-049: touching the machine\'s edge counts, one pixel short does not @spec:AC-049', () => {
+    it("AC-049: touching the machine's edge counts, one pixel short does not @spec:AC-049", () => {
       const body = rectOf(M);
-      hit({ left: body.left - 30, right: body.left, top: body.top, bottom: body.bottom });
+      hit({
+        left: body.left - 30,
+        right: body.left,
+        top: body.top,
+        bottom: body.bottom,
+      });
       expect(hp()).toBe(90);
 
-      hit({ left: body.left - 30, right: body.left - 1, top: body.top, bottom: body.bottom });
+      hit({
+        left: body.left - 30,
+        right: body.left - 1,
+        top: body.top,
+        bottom: body.bottom,
+      });
       expect(hp()).toBe(90);
     });
 
     it('nothing wears a machine down outside a normal round: the countdown, the breaks and sudden death', () => {
-      const countdown = new Match({ roomCode: 'AAAA-AAAA', players: roster, rounds: 4, map: DEFAULT_MAP, draw: () => 0 });
+      const countdown = new Match({
+        roomCode: 'AAAA-AAAA',
+        players: roster,
+        rounds: 4,
+        map: DEFAULT_MAP,
+        draw: () => 0,
+      });
       const early = new Machines(map, countdown);
       early.hit(EVERYTHING, 'worker');
       expect(early.list().every((m) => m.hp === 100)).toBe(true);
@@ -218,7 +248,12 @@ describe('Machines', () => {
       hit(rectOf('machine3'));
       hit(rectOf('machine4'));
       const near3 = rectOf('machine3');
-      const reach = { left: near3.left, right: near3.left + 10, top: near3.top, bottom: near3.top + 10 };
+      const reach = {
+        left: near3.left,
+        right: near3.left + 10,
+        top: near3.top,
+        bottom: near3.top + 10,
+      };
 
       repairFrames(30, { ...reach, right: rectOf('machine4').right });
 
@@ -244,7 +279,9 @@ describe('Machines', () => {
 
       machines.reset();
 
-      expect(machines.list().every((m) => m.hp === 100 && !m.broken)).toBe(true);
+      expect(machines.list().every((m) => m.hp === 100 && !m.broken)).toBe(
+        true,
+      );
     });
 
     it('AC-051: a machine broken before the reset can break again and is announced again @spec:AC-051', () => {

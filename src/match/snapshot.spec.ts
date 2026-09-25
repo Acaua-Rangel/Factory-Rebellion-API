@@ -4,6 +4,7 @@ import { Physics } from './physics';
 import { Simulation } from './simulation';
 import { buildSnapshot, forPlayer } from './snapshot';
 import { Combat, MELEE_COOLDOWN, REVIVE_FRAMES } from './combat';
+import { Machines } from './machines';
 
 const roster = ['p1', 'p2', 'p3', 'p4'].map((id) => ({
   sessionId: id,
@@ -182,6 +183,38 @@ describe('Snapshots', () => {
 
     expect(player.x).toBe(100.12);
     expect(player.y).toBe(200.99);
+  });
+
+  describe('machines', () => {
+    it('AC-051: every machine is listed with its integrity and whether it is broken @spec:AC-051', () => {
+      const machines = new Machines(loadMap(), match);
+
+      const snap = buildSnapshot(match.view(), sim, undefined, machines);
+
+      expect(snap.machines).toHaveLength(7);
+      for (const machine of snap.machines) {
+        expect(Object.keys(machine).sort()).toEqual(['broken', 'hp', 'id']);
+        expect(machine).toMatchObject({ hp: 100, broken: false });
+      }
+    });
+
+    it('AC-051: damage and repairs show in the next snapshot @spec:AC-051', () => {
+      const machines = new Machines(loadMap(), match);
+      const body = loadMap().colliders.find(
+        (c) => c.id === loadMap().machines[0].collider,
+      )!.rect;
+      machines.hit(body, 'worker');
+      machines.hit(body, 'worker');
+
+      const snap = buildSnapshot(match.view(), sim, undefined, machines);
+
+      expect(snap.machines[0].hp).toBe(80);
+      expect(snap.machines.slice(1).every((m) => m.hp === 100)).toBe(true);
+    });
+
+    it('without machines the snapshot falls back to the match view (all intact, no integrity)', () => {
+      expect(snapshot().machines).toHaveLength(7);
+    });
   });
 
   describe('with combat', () => {

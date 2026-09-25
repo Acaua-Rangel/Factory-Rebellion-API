@@ -1,3 +1,4 @@
+import { loadMap } from './map';
 import { JoinLimiter } from '../rooms/join-limiter';
 import { RoomsService } from '../rooms/rooms.service';
 import { PublicSession } from '../session/session.service';
@@ -721,6 +722,221 @@ describe('MatchService', () => {
       matches.tick(16);
 
       expect(() => run(5)).not.toThrow();
+    });
+  });
+
+  describe('machines', () => {
+    const FRAME = 1000 / 60;
+    const run = (frames: number) => {
+      for (let i = 0; i < frames; i++) matches.tick(FRAME);
+    };
+    const players = () => matches.getMatch(code)!.view().players;
+    const put = (id: string, x: number, y = 896, facing: 1 | -1 = 1) => {
+      const b = matches.getSimulation(code)!.bodyOf(id)!;
+      b.x = x;
+      b.y = y;
+      b.vspd = 0;
+      b.facing = facing;
+    };
+    const tuckAway = (keep: string[]) =>
+      players()
+        .filter((p) => !keep.includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 1990 - i * 60, 400));
+    const snapshots = () =>
+      seen
+        .filter((s) => s.event.type === 'snapshot')
+        .map(
+          (s) => s.event as Extract<MatchServiceEvent, { type: 'snapshot' }>,
+        );
+    const hpOf = (id: string) => matches.getMachines(code)!.integrityOf(id);
+    // the lower machine 1 (x=812): a worker standing at x=760 facing right reaches it
+    const M = 'machine7';
+    const worker = () => players().find((p) => p.team === 'workers')!.sessionId;
+    const swing = (id: string, times: number) => {
+      for (let i = 0; i < times; i++) {
+        matches.enqueueInput(id, { inputs: [{ seq: ++swing.seq, a: 1 }] });
+        run(31);
+      }
+    };
+    swing.seq = 0;
+
+    beforeEach(() => {
+      rooms.start('p1');
+      matches.tick(START_MS);
+      run(2);
+      swing.seq = 0;
+    });
+
+    it("AC-047: an Operário's attack next to a machine wears it down by 10, seen in the snapshots @spec:AC-047", () => {
+      const w = worker();
+      tuckAway([w]);
+      put(w, 760, 896, 1);
+
+      swing(w, 1);
+
+      expect(hpOf(M)).toBe(90);
+      const snap = snapshots().at(-1)!.snapshot;
+      expect(snap.machines.find((m) => m.id === M)).toMatchObject({
+        hp: 90,
+        broken: false,
+      });
+    });
+
+    it('AC-047: ten hits break it: the match knows, and everybody is told which machine @spec:AC-047', () => {
+      const w = worker();
+      tuckAway([w]);
+      put(w, 760, 896, 1);
+      seen.length = 0;
+
+      swing(w, 10);
+
+      expect(
+        matches
+          .getMatch(code)!
+          .view()
+          .machines.find((m) => m.id === M)!.broken,
+      ).toBe(true);
+      expect(
+        seen
+          .filter((s) => s.event.type === 'machine_broken')
+          .map((s) => (s.event as { id: string }).id),
+      ).toEqual([M]);
+    });
+
+    it('AC-037: when the last machine breaks the round ends for the workers @spec:AC-037', () => {
+      const machines = matches.getMachines(code)!;
+      const map = loadMap();
+      // ten hits on the body of every machine, as ten swings each would do
+      for (const m of map.machines) {
+        const body = map.colliders.find((c) => c.id === m.collider)!.rect;
+        for (let i = 0; i < 10; i++) machines.hit(body, 'worker');
+      }
+
+      matches.tick(16);
+
+      expect(types()).toContain('round_ended');
+      const ended = seen.find((s) => s.event.type === 'round_ended')!.event as {
+        winner: string;
+        reason: string;
+      };
+      expect(ended).toMatchObject({ winner: 'workers', reason: 'machines' });
+    });
+
+    it("AC-048: a Capataz's attack next to a machine changes nothing @spec:AC-048", () => {
+      const cap = players().find(
+        (p) => p.role === 'policeman' || p.role === 'owner',
+      )!.sessionId;
+      tuckAway([cap]);
+      put(cap, 760, 896, 1);
+
+      swing(cap, 3);
+
+      expect(hpOf(M)).toBe(100);
+    });
+
+    it('AC-049: an Operário too far from the machine changes nothing @spec:AC-049', () => {
+      const w = worker();
+      tuckAway([w]);
+      put(w, 650, 896, 1); // between machine 6 (ends at x=495) and machine 7 (starts at 804)
+
+      swing(w, 3);
+
+      expect(
+        matches
+          .getMachines(code)!
+          .list()
+          .every((m) => m.hp === 100),
+      ).toBe(true);
+    });
+
+    it('AC-050: a downed Operário next to a machine breaks nothing @spec:AC-050', () => {
+      const w = worker();
+      tuckAway([w]);
+      put(w, 760, 896, 1);
+      matches.getMatch(code)!.damage(w, 6);
+      run(2);
+
+      swing(w, 3);
+
+      expect(hpOf(M)).toBe(100);
+    });
+
+    it('AC-051: a new round puts every machine back to full integrity @spec:AC-051', () => {
+      const w = worker();
+      tuckAway([w]);
+      put(w, 760, 896, 1);
+      swing(w, 2);
+      expect(hpOf(M)).toBe(80);
+
+      matches.tick(ROUND_MS); // the clock runs out
+      matches.tick(INTERMISSION_MS);
+
+      expect(matches.getMatch(code)!.view().round).toBe(2);
+      expect(
+        matches
+          .getMachines(code)!
+          .list()
+          .every((m) => m.hp === 100 && !m.broken),
+      ).toBe(true);
+    });
+
+    it('AC-067: the Owner holding interact next to a damaged machine repairs it, seen in the snapshots @spec:AC-067', () => {
+      const owner = players().find((p) => p.role === 'owner')!.sessionId;
+      const w = worker();
+      tuckAway([owner, w]);
+      put(w, 760, 896, 1);
+      swing(w, 4); // 60
+      tuckAway([owner]);
+      put(owner, 760, 896, 1);
+      run(2);
+
+      matches.enqueueInput(owner, {
+        inputs: Array.from({ length: 30 }, (_, i) => ({ seq: i + 1, e: 1 })),
+      });
+      run(30);
+      run(3);
+
+      expect(hpOf(M)).toBeCloseTo(62.5, 6);
+      expect(
+        snapshots()
+          .at(-1)!
+          .snapshot.machines.find((m) => m.id === M)!.hp,
+      ).toBeGreaterThan(60);
+    });
+
+    it('AC-068: reviving a downed teammate comes first: the Owner then repairs nothing @spec:AC-068', () => {
+      const owner = players().find((p) => p.role === 'owner')!.sessionId;
+      const mate = players().find(
+        (p) => p.team === 'capatazes' && p.sessionId !== owner,
+      )!.sessionId;
+      const w = worker();
+      tuckAway([owner, mate, w]);
+      put(w, 760, 896, 1);
+      swing(w, 4);
+      tuckAway([owner, mate]);
+      put(owner, 760, 896, 1);
+      put(mate, 790, 896, 1);
+      matches.getMatch(code)!.damage(mate, 6);
+      run(2);
+
+      matches.enqueueInput(owner, {
+        inputs: Array.from({ length: 30 }, (_, i) => ({ seq: i + 1, e: 1 })),
+      });
+      run(30);
+
+      expect(hpOf(M)).toBe(60);
+    });
+
+    it("a machine's position is available for clients to match their objects to server ids", () => {
+      const sites = matches.machineSites();
+
+      expect(sites).toHaveLength(7);
+      expect(sites[0]).toEqual({
+        id: 'machine1',
+        object: 'obj_maquina1',
+        x: 813,
+        y: 300,
+      });
     });
   });
 

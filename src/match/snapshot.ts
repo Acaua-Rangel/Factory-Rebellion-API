@@ -3,6 +3,7 @@ import { PlayerStatus } from './match.types';
 import { Animation } from './physics';
 import { Score } from './scoring';
 import { Combat } from './combat';
+import { Machines } from './machines';
 import { Simulation } from './simulation';
 
 export interface SnapshotPlayer {
@@ -38,7 +39,8 @@ export interface Snapshot {
   score: Score;
   players: SnapshotPlayer[];
   bullets: SnapshotBullet[];
-  machines: { id: string; broken: boolean }[];
+  // integrity 0..100 and whether it is broken (AC-051)
+  machines: { id: string; hp: number; broken: boolean }[];
 }
 
 // A snapshot plus the number of the last input the server applied for the
@@ -54,6 +56,7 @@ export function buildSnapshot(
   view: MatchView,
   sim: Simulation,
   combat?: Combat,
+  machines?: Machines,
 ): Snapshot {
   return {
     tick: sim.frame,
@@ -82,7 +85,13 @@ export function buildSnapshot(
       y: round2(b.y),
       d: b.dir,
     })),
-    machines: view.machines.map((m) => ({ ...m })),
+    machines:
+      machines?.list() ??
+      view.machines.map((m) => ({
+        id: m.id,
+        hp: m.broken ? 0 : 100,
+        broken: m.broken,
+      })),
   };
 }
 
