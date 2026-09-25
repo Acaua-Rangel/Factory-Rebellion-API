@@ -9,17 +9,14 @@ import {
   ROUND_MS,
   START_MS,
 } from './match-state';
-import { MatchService } from './match.service';
+import { MatchService, MatchServiceEvent } from './match.service';
 
 const player = (id: string): PublicSession => ({
   sessionId: id,
   nickname: id.toUpperCase(),
 });
 
-type Seen = {
-  code: string;
-  event: MatchEvent | { type: 'started'; view: MatchView };
-};
+type Seen = { code: string; event: MatchServiceEvent };
 
 describe('MatchService', () => {
   let rooms: RoomsService;
@@ -40,7 +37,9 @@ describe('MatchService', () => {
     for (const id of ['p2', 'p3', 'p4']) rooms.join(player(id), code);
   });
 
-  const types = () => seen.map((s) => s.event.type);
+  // snapshots have their own tests below; here we follow the rules' events
+  const types = () =>
+    seen.map((s) => s.event.type).filter((type) => type !== 'snapshot');
   const machineIds = () =>
     matches
       .getMatch(code)!
@@ -244,6 +243,260 @@ describe('MatchService', () => {
 
     expect(matches.viewFor('p3')?.roomCode).toBe(code);
     expect(matches.viewFor('stranger')).toBeNull();
+  });
+
+  describe('movement and snapshots', () => {
+    const FRAME = 1000 / 60;
+    const run = (frames: number) => {
+      for (let i = 0; i < frames; i++) matches.tick(FRAME);
+    };
+    const startRound = () => {
+      rooms.start('p1');
+      matches.tick(START_MS);
+    };
+    const someone = () =>
+      matches
+        .getMatch(code)!
+        .view()
+        .players.find((p) => p.team === 'workers')!;
+    const snapshots = () =>
+      seen
+        .filter((s) => s.event.type === 'snapshot')
+        .map(
+          (s) => s.event as Extract<MatchServiceEvent, { type: 'snapshot' }>,
+        );
+
+    it('AC-061: every player gets a body at their spawn when the round starts @spec:AC-061', () => {
+      startRound();
+
+      const sim = matches.getSimulation(code)!;
+      for (const p of matches.getMatch(code)!.view().players) {
+        expect(sim.bodyOf(p.sessionId)!.x).toBe(p.position.x);
+      }
+    });
+
+    it('AC-061: holding right for 60 frames moves the player 240 px, and the match view follows @spec:AC-061', () => {
+      startRound();
+      const me = someone();
+      run(20); // settle on the floor
+      const x0 = matches.getSimulation(code)!.bodyOf(me.sessionId)!.x;
+
+      for (let batch = 0; batch < 2; batch++) {
+        matches.enqueueInput(me.sessionId, {
+          inputs: Array.from({ length: 30 }, (_, i) => ({
+            seq: batch * 30 + i + 1,
+            r: 1,
+          })),
+        });
+        run(30);
+      }
+
+      expect(matches.getSimulation(code)!.bodyOf(me.sessionId)!.x).toBe(
+        x0 + 240,
+      );
+      expect(
+        matches
+          .getMatch(code)!
+          .view()
+          .players.find((p) => p.sessionId === me.sessionId)!.position.x,
+      ).toBe(x0 + 240);
+    });
+
+    it('AC-062: the client cannot move faster by sending inputs early @spec:AC-062', () => {
+      startRound();
+      const me = someone();
+      run(20);
+      const x0 = matches.getSimulation(code)!.bodyOf(me.sessionId)!.x;
+
+      for (let i = 0; i < 6; i++) {
+        matches.enqueueInput(me.sessionId, {
+          inputs: Array.from({ length: 30 }, (_, k) => ({
+            seq: i * 30 + k + 1,
+            r: 1,
+          })),
+        });
+      }
+      run(30);
+
+      expect(
+        matches.getSimulation(code)!.bodyOf(me.sessionId)!.x,
+      ).toBeLessThanOrEqual(x0 + 30 * 4);
+    });
+
+    it('AC-062: inputs from someone who is not in a match are ignored @spec:AC-062', () => {
+      startRound();
+
+      expect(() =>
+        matches.enqueueInput('stranger', { inputs: [{ seq: 1, r: 1 }] }),
+      ).not.toThrow();
+    });
+
+    it('AC-059: snapshots go out 20 times a second while a round is on @spec:AC-059', () => {
+      startRound();
+      seen.length = 0;
+
+      run(60);
+
+      expect(snapshots().length).toBeGreaterThanOrEqual(19);
+      expect(snapshots().length).toBeLessThanOrEqual(21);
+    });
+
+    it('AC-059: no snapshots during the countdown, the breaks or after the match @spec:AC-059', () => {
+      rooms.start('p1');
+      seen.length = 0;
+      run(100); // countdown is 3 s = 180 frames: still counting
+      expect(snapshots()).toEqual([]);
+
+      matches.tick(START_MS);
+      matches.tick(ROUND_MS); // capatazes hold out: break
+      seen.length = 0;
+      run(60);
+      expect(snapshots()).toEqual([]);
+    });
+
+    it('AC-059: a snapshot carries every player, the clock and the acknowledged input of each @spec:AC-059 @spec:AC-060', () => {
+      startRound();
+      const me = someone();
+      matches.enqueueInput(me.sessionId, {
+        inputs: [
+          { seq: 1, r: 1 },
+          { seq: 2, r: 1 },
+          { seq: 3, r: 1 },
+        ],
+      });
+      seen.length = 0;
+
+      run(12);
+      const last = snapshots().at(-1)!;
+
+      expect(last.snapshot.players).toHaveLength(4);
+      expect(last.snapshot.phase).toBe('round');
+      expect(last.snapshot.timeLeftMs).toBeLessThan(ROUND_MS);
+      expect(last.acks[me.sessionId]).toBe(3);
+      expect(
+        last.acks[
+          someone().sessionId === me.sessionId ? 'p1' : someone().sessionId
+        ],
+      ).toBeDefined();
+    });
+
+    it('AC-059: the server frame number in the snapshots keeps going up @spec:AC-059', () => {
+      startRound();
+      seen.length = 0;
+
+      run(30);
+      const ticks = snapshots().map((s) => s.snapshot.tick);
+
+      expect(ticks.length).toBeGreaterThan(3);
+      expect(ticks).toEqual([...ticks].sort((a, b) => a - b));
+      expect(new Set(ticks).size).toBe(ticks.length);
+    });
+
+    it('a stall does not run more than a quarter second of physics in one go', () => {
+      startRound();
+      const sim = matches.getSimulation(code)!;
+      const before = sim.frame;
+
+      matches.tick(10_000);
+
+      expect(sim.frame - before).toBeLessThanOrEqual(15);
+    });
+
+    it('a new round puts every body back at its spawn', () => {
+      startRound();
+      const me = someone();
+      run(20);
+      matches.enqueueInput(me.sessionId, {
+        inputs: Array.from({ length: 20 }, (_, i) => ({ seq: i + 1, r: 1 })),
+      });
+      run(20);
+      const moved = matches.getSimulation(code)!.bodyOf(me.sessionId)!.x;
+      expect(moved).not.toBe(me.position.x);
+
+      matches.tick(ROUND_MS);
+      matches.tick(INTERMISSION_MS); // round 2
+
+      expect(matches.getSimulation(code)!.bodyOf(me.sessionId)!.x).toBe(
+        me.position.x,
+      );
+    });
+
+    it('players cannot move between rounds, and their inputs are acknowledged and dropped', () => {
+      startRound();
+      const me = someone();
+      matches.tick(ROUND_MS); // break
+      const x0 = matches.getSimulation(code)!.bodyOf(me.sessionId)!.x;
+
+      matches.enqueueInput(me.sessionId, {
+        inputs: [
+          { seq: 1, r: 1 },
+          { seq: 2, r: 1 },
+        ],
+      });
+      run(10);
+
+      expect(matches.getSimulation(code)!.bodyOf(me.sessionId)!.x).toBe(x0);
+      expect(matches.getSimulation(code)!.ackOf(me.sessionId)).toBe(2);
+    });
+
+    it('a player who is down cannot move until the next round', () => {
+      startRound();
+      const me = someone();
+      run(20);
+      matches.playerDown(code, me.sessionId);
+      run(2);
+      const x0 = matches.getSimulation(code)!.bodyOf(me.sessionId)!.x;
+
+      matches.enqueueInput(me.sessionId, { inputs: [{ seq: 1, r: 1 }] });
+      run(5);
+
+      expect(matches.getSimulation(code)!.bodyOf(me.sessionId)!.x).toBe(x0);
+    });
+
+    it('a player who leaves loses their body; a newcomer gets one at the next round', () => {
+      startRound();
+      rooms.leave('p4');
+      matches.tick(16);
+      expect(matches.getSimulation(code)!.bodyOf('p4')).toBeUndefined();
+
+      rooms.join(player('late'), code);
+      matches.tick(16);
+      matches.tick(ROUND_MS);
+      matches.tick(INTERMISSION_MS);
+
+      expect(matches.getSimulation(code)!.bodyOf('late')).toBeDefined();
+    });
+
+    it('resyncing lets a reloaded client count its inputs from 1 again', () => {
+      startRound();
+      const me = someone();
+      matches.enqueueInput(me.sessionId, {
+        inputs: [
+          { seq: 1, r: 1 },
+          { seq: 2, r: 1 },
+          { seq: 3, r: 1 },
+        ],
+      });
+      run(5);
+      expect(matches.getSimulation(code)!.ackOf(me.sessionId)).toBe(3);
+
+      matches.resyncInputs(me.sessionId);
+      matches.enqueueInput(me.sessionId, { inputs: [{ seq: 1, r: 1 }] });
+      run(1);
+
+      expect(matches.getSimulation(code)!.ackOf(me.sessionId)).toBe(1);
+    });
+
+    it('the simulation is dropped when the match closes', () => {
+      startRound();
+      matches.tick(ROUND_MS);
+      matches.tick(INTERMISSION_MS);
+      matches.tick(ROUND_MS);
+      // 0-2: the capatazes won twice
+      matches.tick(RESULT_MS);
+
+      expect(matches.getSimulation(code)).toBeUndefined();
+    });
   });
 
   describe('the game loop', () => {

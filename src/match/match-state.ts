@@ -136,6 +136,19 @@ export class Match {
 
   // ---- read by the game loop every frame ------------------------------------
 
+  get roomCodeOf(): string {
+    return this.roomCode;
+  }
+
+  playerIds(): string[] {
+    return this.players.map((p) => p.sessionId);
+  }
+
+  // Only while a round is on can players move and snapshots matter.
+  get playing(): boolean {
+    return this.phase === 'round' || this.phase === 'sudden_death';
+  }
+
   // Can this player move right now? Only while a round is on and they are on
   // their feet (down, watching and between-round players stay put).
   canMove(sessionId: string): boolean {
