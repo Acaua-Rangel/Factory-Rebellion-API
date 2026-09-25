@@ -14,6 +14,7 @@ import {
   MatchView,
 } from './match-state';
 import { GameMap, loadMap } from './map';
+import { Combat } from './combat';
 import { Physics } from './physics';
 import { Simulation } from './simulation';
 import { Snapshot, buildSnapshot } from './snapshot';
@@ -51,6 +52,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
   private physics = new Physics(this.gameMap);
   private readonly matches = new Map<string, Match>();
   private readonly simulations = new Map<string, Simulation>();
+  private readonly combats = new Map<string, Combat>();
   private frameDebt = 0;
   private readonly listeners: ((
     code: string,
@@ -88,6 +90,10 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
 
   getSimulation(code: string): Simulation | undefined {
     return this.simulations.get(code);
+  }
+
+  getCombat(code: string): Combat | undefined {
+    return this.combats.get(code);
   }
 
   // The match a player is currently in, for syncing after a reconnect.
@@ -135,6 +141,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
         if (event.type === 'closed') {
           this.matches.delete(code);
           this.simulations.delete(code);
+          this.combats.delete(code);
           this.rooms.returnToLobby(code);
         }
       }
@@ -168,8 +175,10 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
       for (const player of match.view().players) {
         sim.add(player.sessionId, player.position);
       }
+      this.combats.get(code)?.resetRound();
     } else if (event.type === 'player_left') {
       sim.remove(event.sessionId);
+      this.combats.get(code)?.forget(event.sessionId);
     } else if (event.type === 'player_joined') {
       sim.add(event.player.sessionId, event.player.position);
     }
@@ -180,13 +189,22 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
     if (!sim) {
       return;
     }
+    const combat = this.combats.get(code);
     for (const id of match.playerIds()) {
-      sim.step(id, match.canMove(id));
+      const motion = match.motionOf(id);
+      const applied = sim.step(id, motion);
+      if (motion === 'move') {
+        combat?.act(id, applied);
+      } else {
+        combat?.cancel(id);
+      }
       const body = sim.bodyOf(id);
       if (body) {
         match.setPosition(id, body.x, body.y);
       }
     }
+    // bullets fly, revives go on, cooldowns run down
+    combat?.frame();
     sim.advance();
 
     // 20 snapshots a second while a round is on, at most one per tick
@@ -197,7 +215,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
       }
       this.emit(code, {
         type: 'snapshot',
-        snapshot: buildSnapshot(match.view(), sim),
+        snapshot: buildSnapshot(match.view(), sim, combat),
         acks,
       });
     }
@@ -225,6 +243,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
           sim.add(player.sessionId, player.position);
         }
         this.simulations.set(code, sim);
+        this.combats.set(code, new Combat(this.gameMap, match, sim));
         this.emit(code, { type: 'started', view: match.view() });
         break;
       }
@@ -250,6 +269,7 @@ export class MatchService implements OnModuleInit, OnModuleDestroy {
       case 'deleted':
         this.matches.delete(event.code);
         this.simulations.delete(event.code);
+        this.combats.delete(event.code);
         break;
     }
   }

@@ -3,6 +3,7 @@ import { loadMap } from './map';
 import { Physics } from './physics';
 import { Simulation } from './simulation';
 import { buildSnapshot, forPlayer } from './snapshot';
+import { Combat, MELEE_COOLDOWN, REVIVE_FRAMES } from './combat';
 
 const roster = ['p1', 'p2', 'p3', 'p4'].map((id) => ({
   sessionId: id,
@@ -51,6 +52,7 @@ describe('Snapshots', () => {
         'anim',
         'id',
         'life',
+        'rv',
         'status',
         'x',
         'xs',
@@ -180,5 +182,87 @@ describe('Snapshots', () => {
 
     expect(player.x).toBe(100.12);
     expect(player.y).toBe(200.99);
+  });
+
+  describe('with combat', () => {
+    let combat: Combat;
+    const KEYS = { left: false, right: false, jump: false, down: false };
+    const withCombat = () => buildSnapshot(match.view(), sim, combat);
+    const owner = () =>
+      match.view().players.find((p) => p.role === 'owner')!.sessionId;
+    const put = (id: string, x: number, y = 896, facing: 1 | -1 = 1) => {
+      const b = sim.bodyOf(id)!;
+      b.x = x;
+      b.y = y;
+      b.facing = facing;
+    };
+
+    beforeEach(() => {
+      combat = new Combat(loadMap(), match, sim);
+    });
+
+    it('AC-056: bullets in flight are listed with an id, a position and a direction @spec:AC-056', () => {
+      put(owner(), 800);
+      combat.act(owner(), { ...KEYS, seq: 1, attack: true, interact: false });
+
+      const [bullet] = withCombat().bullets;
+
+      expect(Object.keys(bullet).sort()).toEqual(['d', 'id', 'x', 'y']);
+      expect(bullet.d).toBe(1);
+      expect(bullet.x).toBeGreaterThan(800);
+    });
+
+    it('AC-059: someone who just hit in melee is shown with the hit animation @spec:AC-059', () => {
+      const worker = match
+        .view()
+        .players.find((p) => p.team === 'workers')!.sessionId;
+      combat.act(worker, { ...KEYS, seq: 1, attack: true, interact: false });
+
+      expect(withCombat().players.find((p) => p.id === worker)!.anim).toBe(
+        'hit',
+      );
+      for (let i = 0; i < MELEE_COOLDOWN; i++) combat.frame();
+      expect(withCombat().players.find((p) => p.id === worker)!.anim).not.toBe(
+        'hit',
+      );
+    });
+
+    it('AC-069: a downed player being revived shows how far along it is @spec:AC-069', () => {
+      const [downed, helper] = match
+        .view()
+        .players.filter((p) => p.role === 'policeman' || p.role === 'owner')
+        .map((p) => p.sessionId);
+      put(downed, 800);
+      put(helper, 830);
+      match.damage(downed, 6);
+      for (let i = 0; i < REVIVE_FRAMES / 2; i++) {
+        combat.act(helper, {
+          ...KEYS,
+          seq: i + 1,
+          attack: false,
+          interact: true,
+        });
+        combat.frame();
+      }
+
+      const players = withCombat().players;
+
+      expect(players.find((p) => p.id === downed)!.rv).toBeCloseTo(0.5, 2);
+      expect(players.find((p) => p.id === helper)!.rv).toBe(0);
+    });
+
+    it('without combat the snapshot still works, with no bullets and no progress', () => {
+      const snap = snapshot();
+
+      expect(snap.bullets).toEqual([]);
+      expect(snap.players.every((p) => p.rv === 0)).toBe(true);
+    });
+
+    it('AC-005: bullets never carry who fired them by session, only a number @spec:AC-005 @principle:P-005', () => {
+      put(owner(), 800);
+      combat.act(owner(), { ...KEYS, seq: 1, attack: true, interact: false });
+
+      expect(JSON.stringify(withCombat().bullets)).not.toContain(owner());
+    });
   });
 });

@@ -499,6 +499,214 @@ describe('MatchService', () => {
     });
   });
 
+  describe('combat', () => {
+    const FRAME = 1000 / 60;
+    const run = (frames: number) => {
+      for (let i = 0; i < frames; i++) matches.tick(FRAME);
+    };
+    const players = () => matches.getMatch(code)!.view().players;
+    const ownerId = () => players().find((p) => p.role === 'owner')!.sessionId;
+    const someoneOf = (team: string, not?: string) =>
+      players().find((p) => p.team === team && p.sessionId !== not)!;
+    const put = (id: string, x: number, y = 896, facing: 1 | -1 = 1) => {
+      const b = matches.getSimulation(code)!.bodyOf(id)!;
+      b.x = x;
+      b.y = y;
+      b.vspd = 0;
+      b.facing = facing;
+    };
+    const lifeOf = (id: string) =>
+      players().find((p) => p.sessionId === id)!.life;
+    const statusOf = (id: string) =>
+      players().find((p) => p.sessionId === id)!.status;
+    const snapshots = () =>
+      seen
+        .filter((s) => s.event.type === 'snapshot')
+        .map(
+          (s) => s.event as Extract<MatchServiceEvent, { type: 'snapshot' }>,
+        );
+    beforeEach(() => {
+      rooms.start('p1');
+      matches.tick(START_MS);
+      run(2);
+    });
+
+    it('AC-056: an attack input from the Owner puts a bullet in the world, seen in the next snapshot @spec:AC-056', () => {
+      const owner = ownerId();
+      put(owner, 1000, 896, 1);
+      seen.length = 0;
+
+      matches.enqueueInput(owner, { inputs: [{ seq: 1, a: 1 }] });
+      run(6);
+
+      const last = snapshots().at(-1)!;
+      expect(last.snapshot.bullets.length).toBe(1);
+      expect(last.snapshot.bullets[0].d).toBe(1);
+    });
+
+    it('AC-056: the same attack from a Policeman or an Operário never makes a bullet @spec:AC-056', () => {
+      const other = players().find(
+        (p) => p.role === 'policeman' || p.role === 'worker',
+      )!.sessionId;
+      put(other, 1000);
+
+      matches.enqueueInput(other, { inputs: [{ seq: 1, a: 1 }] });
+      run(6);
+
+      expect(snapshots().at(-1)?.snapshot.bullets ?? []).toEqual([]);
+    });
+
+    it('AC-058: the bullet takes life from the enemy in front, and everybody sees it @spec:AC-058', () => {
+      const owner = ownerId();
+      const victim = someoneOf('workers').sessionId;
+      put(owner, 1000, 896, 1);
+      put(victim, 1100);
+      // the other two players stay out of the way
+      players()
+        .filter((p) => ![owner, victim].includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 200 + i * 80, 400));
+
+      matches.enqueueInput(owner, { inputs: [{ seq: 1, a: 1 }] });
+      run(15);
+
+      expect(lifeOf(victim)).toBe(5);
+      const snap = snapshots().at(-1)!.snapshot;
+      expect(snap.players.find((p) => p.id === victim)!.life).toBe(5);
+    });
+
+    it('AC-052: enough hits incapacitate: they cannot move or attack, and they fall to the ground @spec:AC-052', () => {
+      const attacker = someoneOf('workers').sessionId;
+      const victim = someoneOf('capatazes', ownerId()).sessionId;
+      players()
+        .filter((p) => ![attacker, victim].includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 200 + i * 80, 400));
+      put(attacker, 1000, 896, 1);
+      put(victim, 1060, 896, 1);
+
+      for (let hit = 0; hit < 3; hit++) {
+        matches.enqueueInput(attacker, { inputs: [{ seq: hit + 1, a: 1 }] });
+        run(31);
+      }
+      expect(statusOf(victim)).toBe('incapacitated');
+      expect(lifeOf(victim)).toBe(0);
+
+      const x0 = matches.getSimulation(code)!.bodyOf(victim)!.x;
+      matches.enqueueInput(victim, {
+        inputs: Array.from({ length: 10 }, (_, i) => ({
+          seq: i + 1,
+          r: 1,
+          a: 1,
+        })),
+      });
+      run(20);
+      expect(matches.getSimulation(code)!.bodyOf(victim)!.x).toBe(x0);
+      expect(lifeOf(attacker)).toBe(6); // the downed player's attacks did nothing
+    });
+
+    it('AC-054: hits between teammates do nothing @spec:AC-054', () => {
+      const a = someoneOf('workers').sessionId;
+      const b = someoneOf('workers', a).sessionId;
+      players()
+        .filter((p) => ![a, b].includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 200 + i * 80, 400));
+      put(a, 1000, 896, 1);
+      put(b, 1030, 896, 1);
+
+      matches.enqueueInput(a, { inputs: [{ seq: 1, a: 1 }] });
+      run(5);
+
+      expect(lifeOf(b)).toBe(6);
+    });
+
+    it('AC-069: holding the interact key next to a downed teammate for 3 seconds brings them back with 1 heart @spec:AC-069', () => {
+      const downed = someoneOf('capatazes').sessionId;
+      const helper = someoneOf('capatazes', downed).sessionId;
+      players()
+        .filter((p) => ![downed, helper].includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 200 + i * 80, 400));
+      put(downed, 1000);
+      put(helper, 1030);
+      matches.getMatch(code)!.damage(downed, 6);
+      run(2);
+
+      let seq = 0;
+      for (let block = 0; block < 6; block++) {
+        matches.enqueueInput(helper, {
+          inputs: Array.from({ length: 30 }, () => ({ seq: ++seq, e: 1 })),
+        });
+        run(30);
+      }
+
+      expect(statusOf(downed)).toBe('active');
+      expect(lifeOf(downed)).toBe(2);
+    });
+
+    it('AC-069: the progress shows in the snapshots while the revive is under way @spec:AC-069', () => {
+      const downed = someoneOf('capatazes').sessionId;
+      const helper = someoneOf('capatazes', downed).sessionId;
+      players()
+        .filter((p) => ![downed, helper].includes(p.sessionId))
+        .forEach((p, i) => put(p.sessionId, 200 + i * 80, 400));
+      put(downed, 1000);
+      put(helper, 1030);
+      matches.getMatch(code)!.damage(downed, 6);
+      run(2);
+      seen.length = 0;
+
+      matches.enqueueInput(helper, {
+        inputs: Array.from({ length: 30 }, (_, i) => ({ seq: i + 1, e: 1 })),
+      });
+      run(30);
+
+      const rv = snapshots()
+        .at(-1)!
+        .snapshot.players.find((p) => p.id === downed)!.rv;
+      expect(rv).toBeGreaterThan(0.1);
+      expect(rv).toBeLessThan(0.25);
+    });
+
+    it('AC-053: a new round brings everyone back on their feet with full life and no bullets @spec:AC-053', () => {
+      const owner = ownerId();
+      const victim = someoneOf('workers').sessionId;
+      put(owner, 1000, 896, 1);
+      put(victim, 1100);
+      matches.enqueueInput(owner, { inputs: [{ seq: 1, a: 1 }] });
+      run(15);
+      matches.getMatch(code)!.damage(victim, 6);
+
+      matches.tick(ROUND_MS);
+      matches.tick(INTERMISSION_MS);
+
+      expect(statusOf(victim)).toBe('active');
+      expect(lifeOf(victim)).toBe(6);
+      expect(matches.getCombat(code)!.bullets).toEqual([]);
+    });
+
+    it("AC-055: a downed player's inputs are still acknowledged, so the client does not pile them up @spec:AC-055", () => {
+      const victim = someoneOf('workers').sessionId;
+      matches.getMatch(code)!.damage(victim, 6);
+      run(2);
+
+      matches.enqueueInput(victim, {
+        inputs: [
+          { seq: 1, r: 1 },
+          { seq: 2, a: 1 },
+          { seq: 3, e: 1 },
+        ],
+      });
+      run(5);
+
+      expect(matches.getSimulation(code)!.ackOf(victim)).toBe(3);
+    });
+
+    it('a player who leaves leaves no combat state behind', () => {
+      rooms.leave('p4');
+      matches.tick(16);
+
+      expect(() => run(5)).not.toThrow();
+    });
+  });
+
   describe('the game loop', () => {
     afterEach(() => jest.useRealTimers());
 

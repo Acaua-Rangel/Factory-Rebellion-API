@@ -400,6 +400,7 @@ describe('Match messages over the WebSocket', () => {
           'anim',
           'id',
           'life',
+          'rv',
           'status',
           'x',
           'xs',
