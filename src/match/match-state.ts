@@ -1,3 +1,4 @@
+import { loadMap } from './map';
 import { drawTeams } from './team-draw';
 import { MatchPlayer, Point, Team } from './match.types';
 import { Seat, seatOf, takeSeat } from './replacement';
@@ -16,23 +17,10 @@ export interface MatchMap {
   machineIds: string[];
 }
 
-// Placeholder layout until the map is exported from the GameMaker room (T-026).
+// Spawns and machines of the room exported from GameMaker (scripts/export-map.ts).
 export const DEFAULT_MAP: MatchMap = {
-  spawns: {
-    workers: [
-      { x: 200, y: 400 },
-      { x: 260, y: 400 },
-      { x: 320, y: 400 },
-      { x: 380, y: 400 },
-    ],
-    capatazes: [
-      { x: 1800, y: 400 },
-      { x: 1740, y: 400 },
-      { x: 1680, y: 400 },
-      { x: 1620, y: 400 },
-    ],
-  },
-  machineIds: ['machine1', 'machine2', 'machine3'],
+  spawns: loadMap().spawns,
+  machineIds: loadMap().machines.map((machine) => machine.id),
 };
 
 // starting = countdown before round 1 · round = normal 60 s round ·
@@ -144,6 +132,27 @@ export class Match {
       machines: [...this.machines].map(([id, broken]) => ({ id, broken })),
       result: this.result && { ...this.result },
     };
+  }
+
+  // ---- read by the game loop every frame ------------------------------------
+
+  // Can this player move right now? Only while a round is on and they are on
+  // their feet (down, watching and between-round players stay put).
+  canMove(sessionId: string): boolean {
+    if (this.phase !== 'round' && this.phase !== 'sudden_death') {
+      return false;
+    }
+    return (
+      this.players.find((p) => p.sessionId === sessionId)?.status === 'active'
+    );
+  }
+
+  // The simulation moved a player: keep the match's view of the world in sync.
+  setPosition(sessionId: string, x: number, y: number): void {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (player) {
+      player.position = { x, y };
+    }
   }
 
   // ---- things that happen (state only; resolved by the next tick) ----------

@@ -155,10 +155,10 @@ describe('Match — start and round setup', () => {
     expect(MAX_LIFE).toBe(6);
   });
 
-  it('the default map has spawns for a full team and 3 machines', () => {
+  it('the default map is the exported room: spawns for a full team and its 7 machines', () => {
     expect(DEFAULT_MAP.spawns.workers.length).toBeGreaterThanOrEqual(4);
     expect(DEFAULT_MAP.spawns.capatazes.length).toBeGreaterThanOrEqual(4);
-    expect(DEFAULT_MAP.machineIds).toHaveLength(3);
+    expect(DEFAULT_MAP.machineIds).toHaveLength(7);
   });
 
   it('AC-005: the match view never carries a session token, only public fields @spec:AC-005 @principle:P-005', () => {
