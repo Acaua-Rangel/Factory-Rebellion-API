@@ -1,4 +1,5 @@
 import { loadMap } from './map';
+import { Motion } from './simulation';
 import { drawTeams } from './team-draw';
 import { MatchPlayer, Point, Team } from './match.types';
 import { Seat, seatOf, takeSeat } from './replacement';
@@ -11,6 +12,7 @@ export const INTERMISSION_MS = 5_000; // ASM-014
 export const RESULT_MS = 10_000; // ASM-014
 export const START_MS = 3_000; // lets clients load the game screen (ASM-032)
 export const MAX_LIFE = 6;
+export const REVIVE_LIFE = 2; // a revived player comes back with 1 heart
 
 export interface MatchMap {
   spawns: Record<Team, Point[]>;
@@ -160,6 +162,26 @@ export class Match {
     );
   }
 
+  // What the physics should do with a player this frame: follow their inputs,
+  // let a downed player fall to the ground, or keep everybody still.
+  motionOf(sessionId: string): Motion {
+    if (!this.playing) {
+      return 'frozen';
+    }
+    const status = this.players.find((p) => p.sessionId === sessionId)?.status;
+    if (status === 'active') {
+      return 'move';
+    }
+    return status === 'incapacitated' || status === 'eliminated'
+      ? 'fall'
+      : 'frozen';
+  }
+
+  // The players as the game loop needs them, without copying (do not modify).
+  roster(): readonly MatchPlayer[] {
+    return this.players;
+  }
+
   // The simulation moved a player: keep the match's view of the world in sync.
   setPosition(sessionId: string, x: number, y: number): void {
     const player = this.players.find((p) => p.sessionId === sessionId);
@@ -189,6 +211,40 @@ export class Match {
     player.life = 0;
     player.status =
       this.phase === 'sudden_death' ? 'eliminated' : 'incapacitated';
+  }
+
+  // Takes half-hearts of life. At zero the player goes down: incapacitated
+  // until the next round, or eliminated for good in sudden death (AC-052,
+  // AC-043). Someone already down, watching, or a hit outside a round changes
+  // nothing.
+  damage(sessionId: string, halfHearts: number): void {
+    if (!this.playing || !(halfHearts > 0)) {
+      return;
+    }
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (player?.status !== 'active') {
+      return;
+    }
+    player.life = Math.max(0, player.life - halfHearts);
+    if (player.life === 0) {
+      player.status =
+        this.phase === 'sudden_death' ? 'eliminated' : 'incapacitated';
+    }
+  }
+
+  // A teammate got a downed player back up: 1 heart (2 half-hearts). Only in a
+  // normal round: in sudden death the eliminated stay out (AC-069, AC-071).
+  revive(sessionId: string): boolean {
+    if (this.phase !== 'round') {
+      return false;
+    }
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (player?.status !== 'incapacitated') {
+      return false;
+    }
+    player.status = 'active';
+    player.life = REVIVE_LIFE;
+    return true;
   }
 
   removePlayer(sessionId: string): void {

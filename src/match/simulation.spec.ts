@@ -236,6 +236,80 @@ describe('Simulation (inputs to movement, one frame at a time)', () => {
     expect(x()).toBe(spawn.x + 8);
   });
 
+  describe('action keys and the fallen', () => {
+    it('AC-056: the attack key (a) and the interact key (e) are read next to the movement keys @spec:AC-056', () => {
+      send([
+        key(1, { r: 1 }),
+        { seq: 2, a: 1 },
+        { seq: 3, e: true },
+        { seq: 4, a: 0, e: 0 },
+      ]);
+
+      const applied = [1, 2, 3, 4].map(() => sim.step('ana', 'move'));
+
+      expect(applied.map((i) => [i!.seq, i!.attack, i!.interact])).toEqual([
+        [1, false, false],
+        [2, true, false],
+        [3, false, true],
+        [4, false, false],
+      ]);
+    });
+
+    it('step reports the input it applied so combat can act on it, and nothing when there was none', () => {
+      send([key(1, { r: 1 })]);
+
+      expect(sim.step('ana', 'move')).toMatchObject({ seq: 1, right: true });
+      expect(sim.step('ana', 'move')).toBeUndefined(); // the next input is late
+    });
+
+    it('AC-055: an attack sent while the player cannot move is thrown away, not reported @spec:AC-055', () => {
+      send([
+        { seq: 1, a: 1 },
+        { seq: 2, a: 1 },
+      ]);
+
+      expect(sim.step('ana', 'frozen')).toBeUndefined();
+      expect(sim.step('ana', 'fall')).toBeUndefined();
+      expect(sim.ackOf('ana')).toBe(2);
+    });
+
+    it('AC-055: a fallen player ignores their movement keys but still falls to the ground @spec:AC-055', () => {
+      const air = { x: 700, y: 600 };
+      sim.add('bia', air);
+      sim.enqueue('bia', {
+        inputs: Array.from({ length: 20 }, (_, i) => ({ seq: i + 1, r: 1 })),
+      });
+
+      for (let f = 0; f < 200; f++) sim.step('bia', 'fall');
+      const body = sim.bodyOf('bia')!;
+
+      expect(body.x).toBe(700); // the keys did nothing
+      // and gravity took them down onto the rope at y=732 (feet on row 731)
+      expect(body.y).toBeGreaterThan(600);
+      expect(Math.round(body.y) + map.playerMask.bottom).toBe(731);
+      expect(sim.ackOf('bia')).toBe(20);
+    });
+
+    it('a frozen player does not fall or move at all', () => {
+      const before = { x: x(), y: sim.bodyOf('ana')!.y };
+
+      for (let f = 0; f < 30; f++) sim.step('ana', 'frozen');
+
+      expect(x()).toBe(before.x);
+      expect(sim.bodyOf('ana')!.y).toBe(before.y);
+    });
+
+    it('true and false still mean move and frozen', () => {
+      send([key(1, { r: 1 })]);
+
+      sim.step('ana', false);
+      expect(x()).toBe(spawn.x);
+      send([key(3, { r: 1 })]);
+      sim.step('ana', true);
+      expect(x()).toBe(spawn.x + 4);
+    });
+  });
+
   it('adding a player again puts a fresh body at the given place (round start)', () => {
     send([key(1, { r: 1 })]);
     frames(3);

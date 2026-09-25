@@ -7,9 +7,21 @@ import { Point } from './match.types';
 export const MAX_QUEUE = 30;
 export const MAX_BATCH = 30;
 
-interface QueuedInput extends Input {
+// What one frame of a player asked for: the four movement keys, the attack
+// key (a press, like jump) and the interact key (held: revive, repair).
+export interface AppliedInput extends Input {
   seq: number;
+  attack: boolean;
+  interact: boolean;
 }
+
+// move = follow the inputs · fall = ignore them but let gravity act (a downed
+// player) · frozen = nothing moves (between rounds, waiting for a round)
+export type Motion = 'move' | 'fall' | 'frozen';
+
+const NO_KEYS: Input = { left: false, right: false, jump: false, down: false };
+
+type QueuedInput = AppliedInput;
 
 interface PlayerSim {
   body: Body;
@@ -108,26 +120,36 @@ export class Simulation {
         right: isKey(e.r),
         jump: isKey(e.j),
         down: isKey(e.f),
+        attack: isKey(e.a),
+        interact: isKey(e.e),
       });
       accepted++;
     }
     return accepted;
   }
 
-  // One frame of one player. `canMove` false (down, waiting, between rounds):
-  // their inputs are thrown away but acknowledged, and the body stays put.
-  step(sessionId: string, canMove: boolean): void {
+  // One frame of one player. Returns the input it applied (so combat can act
+  // on the attack and interact keys), or undefined when there was none.
+  // `true`/`false` mean move/frozen.
+  step(sessionId: string, motion: Motion | boolean): AppliedInput | undefined {
     const player = this.players.get(sessionId);
     if (!player) {
-      return;
+      return undefined;
     }
+    const mode: Motion =
+      motion === true ? 'move' : motion === false ? 'frozen' : motion;
 
-    if (!canMove) {
+    if (mode !== 'move') {
+      // their inputs are thrown away but acknowledged, so the client's
+      // prediction does not pile up
       if (player.queue.length > 0) {
         player.ack = player.queue[player.queue.length - 1].seq;
         player.queue = [];
       }
-      return;
+      if (mode === 'fall') {
+        this.physics.step(player.body, NO_KEYS);
+      }
+      return undefined;
     }
 
     // No input for this frame (it is late): the player waits. Nothing moves and
@@ -138,10 +160,10 @@ export class Simulation {
     // them faster.
     const next = player.queue.shift();
     if (!next) {
-      return;
+      return undefined;
     }
     player.ack = next.seq;
-    const input: Input = next;
-    this.physics.step(player.body, input);
+    this.physics.step(player.body, next);
+    return next;
   }
 }

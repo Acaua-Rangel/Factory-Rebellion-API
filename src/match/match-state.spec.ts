@@ -820,3 +820,171 @@ describe('Match — players who leave and players who take their seat', () => {
     expect(m.addPlayer('newbie', 'NEWBIE')).toBe(false);
   });
 });
+
+describe('Match — life, being downed and being revived', () => {
+  const lifeOf = (m: Match, id: string) =>
+    m.view().players.find((p) => p.sessionId === id)!;
+
+  it('AC-052: damage takes life away in half-hearts and never below zero @spec:AC-052', () => {
+    const m = newMatch();
+    begin(m);
+    const victim = ids(m, 'workers')[0];
+
+    m.damage(victim, 1);
+    expect(lifeOf(m, victim).life).toBe(5);
+    m.damage(victim, 2);
+    expect(lifeOf(m, victim).life).toBe(3);
+    expect(lifeOf(m, victim).status).toBe('active');
+
+    m.damage(victim, 99);
+    expect(lifeOf(m, victim).life).toBe(0);
+  });
+
+  it('AC-052: when life reaches zero in a normal round the player is incapacitated, not eliminated @spec:AC-052', () => {
+    const m = newMatch();
+    begin(m);
+    const victim = ids(m, 'workers')[0];
+
+    m.damage(victim, MAX_LIFE);
+
+    expect(lifeOf(m, victim).status).toBe('incapacitated');
+    expect(m.motionOf(victim)).toBe('fall');
+    expect(m.canMove(victim)).toBe(false);
+  });
+
+  it('AC-043: when life reaches zero in sudden death the player is eliminated for good @spec:AC-043', () => {
+    const m = newMatch();
+    toSuddenDeath(m);
+    const victim = ids(m, 'workers')[0];
+
+    m.damage(victim, MAX_LIFE);
+
+    expect(lifeOf(m, victim).status).toBe('eliminated');
+    expect(m.motionOf(victim)).toBe('fall');
+  });
+
+  it('AC-052: damage to someone who is already down, watching or outside a round does nothing @spec:AC-052', () => {
+    const m = newMatch();
+    m.damage('p1', 3); // countdown
+    expect(lifeOf(m, 'p1').life).toBe(MAX_LIFE);
+
+    begin(m);
+    m.damage('p1', MAX_LIFE);
+    m.damage('p1', 1); // already down
+    expect(lifeOf(m, 'p1').life).toBe(0);
+
+    m.tick(ROUND_MS); // break
+    m.damage('p2', 3);
+    expect(lifeOf(m, 'p2').life).toBe(MAX_LIFE);
+  });
+
+  it('AC-052: damage of zero or less, or to nobody, changes nothing @spec:AC-052', () => {
+    const m = newMatch();
+    begin(m);
+
+    m.damage('p1', 0);
+    m.damage('p1', -3);
+    m.damage('nobody', 3);
+
+    expect(m.view().players.every((p) => p.life === MAX_LIFE)).toBe(true);
+  });
+
+  it('AC-052: the round is decided at the next tick, so two falls in the same tick are seen together @spec:AC-052', () => {
+    const m = newMatch();
+    toSuddenDeath(m);
+    ids(m, 'workers').forEach((id) => m.damage(id, MAX_LIFE));
+    ids(m, 'capatazes').forEach((id) => m.damage(id, MAX_LIFE));
+
+    expect(types(m.tick(16))).toContain('sudden_death_tie');
+  });
+
+  it('AC-069: reviving an incapacitated player puts them back on their feet with 1 heart (2 half-hearts) @spec:AC-069', () => {
+    const m = newMatch();
+    begin(m);
+    const victim = ids(m, 'capatazes')[1];
+    m.damage(victim, MAX_LIFE);
+
+    expect(m.revive(victim)).toBe(true);
+
+    expect(lifeOf(m, victim)).toMatchObject({ status: 'active', life: 2 });
+    expect(m.canMove(victim)).toBe(true);
+  });
+
+  it('AC-069: a revived player counts as standing again, so the round is not lost for their team @spec:AC-069', () => {
+    const m = newMatch(8);
+    begin(m);
+    const workers = ids(m, 'workers');
+    workers.forEach((id) => m.damage(id, MAX_LIFE));
+    m.revive(workers[0]);
+
+    expect(m.tick(16)).toEqual([]);
+    expect(m.view().phase).toBe('round');
+  });
+
+  it('AC-071: nobody is revived in sudden death @spec:AC-071', () => {
+    const m = newMatch(8);
+    toSuddenDeath(m);
+    const victim = ids(m, 'workers')[0];
+    m.damage(victim, MAX_LIFE);
+
+    expect(m.revive(victim)).toBe(false);
+    expect(lifeOf(m, victim).status).toBe('eliminated');
+  });
+
+  it('AC-069: only an incapacitated player can be revived @spec:AC-069', () => {
+    const m = newMatch();
+    begin(m);
+
+    expect(m.revive('p1')).toBe(false); // on their feet
+    expect(m.revive('nobody')).toBe(false);
+    m.damage('p1', 1);
+    expect(m.revive('p1')).toBe(false);
+    expect(lifeOf(m, 'p1').life).toBe(5);
+  });
+
+  it('AC-053: a player who was downed is back on their feet with full life next round @spec:AC-053', () => {
+    const m = newMatch(8);
+    begin(m);
+    const victim = ids(m, 'capatazes')[0];
+    m.damage(victim, MAX_LIFE);
+    m.tick(ROUND_MS);
+
+    m.tick(INTERMISSION_MS);
+
+    expect(lifeOf(m, victim)).toMatchObject({
+      status: 'active',
+      life: MAX_LIFE,
+    });
+  });
+
+  it('motion: move while on their feet in a round, fall when down, frozen otherwise', () => {
+    const m = newMatch(8);
+    expect(m.motionOf('p1')).toBe('frozen'); // countdown
+
+    begin(m);
+    const [a, b] = ids(m, 'workers');
+    m.damage(b, MAX_LIFE);
+    expect(m.motionOf(a)).toBe('move');
+    expect(m.motionOf(b)).toBe('fall');
+
+    m.removePlayer(ids(m, 'capatazes')[0]);
+    m.addPlayer('late', 'LATE');
+    m.tick(16);
+    expect(m.motionOf('late')).toBe('frozen'); // watching until the next round
+
+    m.tick(ROUND_MS);
+    expect(m.motionOf(a)).toBe('frozen'); // break
+    expect(m.motionOf('nobody')).toBe('frozen');
+  });
+
+  it('exposes the roster without copying it, for the game loop', () => {
+    const m = newMatch();
+
+    expect(
+      m
+        .roster()
+        .map((p) => p.sessionId)
+        .sort(),
+    ).toEqual(['p1', 'p2', 'p3', 'p4']);
+  });
+});
