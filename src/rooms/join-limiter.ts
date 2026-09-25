@@ -1,3 +1,5 @@
+import { Injectable } from '@nestjs/common';
+
 const MAX_FAILURES = 10;
 const WINDOW_MS = 60_000;
 const BLOCK_MS = 60_000;
@@ -6,6 +8,7 @@ const BLOCK_MS = 60_000;
 // within a minute, the player is blocked for 60 seconds. A successful join
 // deliberately does NOT reset the counter, otherwise someone could join their
 // own room every 9 guesses and never be stopped.
+@Injectable()
 export class JoinLimiter {
   // Injectable clock so tests don't have to wait real minutes.
   clock: () => number = () => Date.now();

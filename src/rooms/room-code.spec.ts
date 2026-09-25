@@ -47,10 +47,15 @@ describe('Room codes', () => {
     expect(normalizeRoomCode(typed)).toBe(expected);
   });
 
-  it.each(['', 'ABC', 'ABCD-EFG', 'ABCD-EFGHJ', 'ABCD-EFG1', 'IIII-OOOO', 12345])(
-    'AC-022: "%s" is not a room code @spec:AC-022',
-    (typed) => {
-      expect(normalizeRoomCode(typed as string)).toBeNull();
-    },
-  );
+  it.each([
+    '',
+    'ABC',
+    'ABCD-EFG',
+    'ABCD-EFGHJ',
+    'ABCD-EFG1',
+    'IIII-OOOO',
+    12345,
+  ])('AC-022: "%s" is not a room code @spec:AC-022', (typed) => {
+    expect(normalizeRoomCode(typed as string)).toBeNull();
+  });
 });
