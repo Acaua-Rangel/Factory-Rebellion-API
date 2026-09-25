@@ -287,7 +287,7 @@ describe('Match messages over the WebSocket', () => {
     client.send({ t: 'match.sync' });
     const state = await client.next('match.state');
 
-    expect(state.d).toEqual({ view: null });
+    expect(state.d.view).toBeNull(); // (the machine sites come along: tested above)
   });
 
   it('P-003: nothing a client sends can change the match: the server is the only judge @principle:P-003', async () => {
@@ -550,6 +550,134 @@ describe('Match messages over the WebSocket', () => {
       run(6);
 
       expect((await lastSnapshot(mine.client)).ack).toBe(1);
+    });
+
+    describe('machines over the wire', () => {
+      const startRound = async () => {
+        const room = await startMatch();
+        matches.tick(START_MS);
+        run(2);
+        return room;
+      };
+      const put = (
+        code: string,
+        id: string,
+        x: number,
+        y = 896,
+        facing: 1 | -1 = 1,
+      ) => {
+        const b = matches.getSimulation(code)!.bodyOf(id)!;
+        b.x = x;
+        b.y = y;
+        b.vspd = 0;
+        b.facing = facing;
+      };
+
+      it('AC-051: the start of the match tells clients where each machine is @spec:AC-051', async () => {
+        const { started } = await startMatch();
+
+        for (const message of started) {
+          expect(message.d.sites).toHaveLength(7);
+          expect(message.d.sites[0]).toEqual({
+            id: 'machine1',
+            object: 'obj_maquina1',
+            x: 813,
+            y: 300,
+          });
+        }
+      });
+
+      it('AC-051: match.sync also carries the machine positions, in or out of a match @spec:AC-051', async () => {
+        const { client } = await login('SOLO');
+
+        client.send({ t: 'match.sync' });
+        const state = await client.next('match.state');
+
+        expect(state.d.view).toBeNull();
+        expect(state.d.sites).toHaveLength(7);
+      });
+
+      it("AC-047: an Operário's attack next to a machine shows in everybody's snapshots @spec:AC-047", async () => {
+        const { all, code, started } = await startRound();
+        const view = started[0].d.view;
+        const workerId = view.players.find(
+          (p: any) => p.team === 'workers',
+        ).sessionId;
+        const mine = all.find((p) => p.session.sessionId === workerId)!;
+        view.players
+          .filter((p: any) => p.sessionId !== workerId)
+          .forEach((p: any, i: number) =>
+            put(code, p.sessionId, 1990 - i * 60, 400),
+          );
+        put(code, workerId, 760);
+
+        mine.client.send({ t: 'input', d: { inputs: [{ seq: 1, a: 1 }] } });
+        await sleep(50);
+        run(9);
+        await sleep(80);
+
+        for (const { client } of all) {
+          const last = client.messages
+            .filter((m) => m.t === 'match.snapshot')
+            .at(-1)!.d;
+          expect(
+            last.machines.find((m: any) => m.id === 'machine7'),
+          ).toMatchObject({ hp: 90, broken: false });
+        }
+      });
+
+      it('AC-047: when a machine breaks every player is told which one @spec:AC-047', async () => {
+        const { all, code } = await startRound();
+        const machines = matches.getMachines(code)!;
+        const map = matches.gameMap;
+        const body = map.colliders.find(
+          (c) =>
+            c.id === map.machines.find((m) => m.id === 'machine3')!.collider,
+        )!.rect;
+        for (const { client } of all) client.messages.length = 0;
+
+        for (let i = 0; i < 10; i++) machines.hit(body, 'worker');
+        await sleep(80);
+
+        for (const { client } of all) {
+          const told = client.messages.filter(
+            (m) => m.t === 'match.machine_broken',
+          );
+          expect(told.map((m) => m.d)).toEqual([{ id: 'machine3' }]);
+        }
+      });
+
+      it("AC-048: a client cannot set a machine's integrity, break it or repair it by itself @spec:AC-048", async () => {
+        const { all, code } = await startRound();
+        const before = JSON.stringify(matches.getMachines(code)!.list());
+
+        for (const message of [
+          { t: 'machine.hit', d: { id: 'machine1', damage: 100 } },
+          { t: 'machine.broken', d: { id: 'machine1' } },
+          { t: 'machine.repair', d: { id: 'machine1', hp: 100 } },
+          { t: 'match.machines', d: { machines: [{ id: 'machine1', hp: 0 }] } },
+          {
+            t: 'input',
+            d: {
+              inputs: [
+                {
+                  seq: 1,
+                  hp: 0,
+                  broken: true,
+                  machine: 'machine1',
+                  damage: 999,
+                },
+              ],
+            },
+          },
+        ]) {
+          all[0].client.send(message);
+        }
+        await sleep(80);
+        run(5);
+
+        expect(JSON.stringify(matches.getMachines(code)!.list())).toBe(before);
+      });
     });
 
     describe('combat over the wire', () => {
