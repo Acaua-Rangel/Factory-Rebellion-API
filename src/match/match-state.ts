@@ -146,6 +146,10 @@ export class Match {
     return this.players.map((p) => p.sessionId);
   }
 
+  get inSuddenDeath(): boolean {
+    return this.phase === 'sudden_death';
+  }
+
   // Only while a round is on can players move and snapshots matter.
   get playing(): boolean {
     return this.phase === 'round' || this.phase === 'sudden_death';
