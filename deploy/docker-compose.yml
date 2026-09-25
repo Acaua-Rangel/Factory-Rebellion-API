@@ -1,0 +1,33 @@
+# Usage (on the VPS, with the DNS name of API_DOMAIN pointing at it):
+#   cp .env.example .env   # set API_DOMAIN
+#   docker compose up -d --build
+services:
+  api:
+    build: ..
+    init: true
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_DOMAIN: "${API_DOMAIN:?set API_DOMAIN in deploy/.env}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

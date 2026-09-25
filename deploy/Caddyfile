@@ -1,0 +1,6 @@
+# Caddy gets and renews the TLS certificate by itself and proxies both the
+# HTTP API (/sessions) and the WebSocket (/ws) to the Nest container.
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:3000
+}
