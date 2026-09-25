@@ -22,6 +22,12 @@ export interface Connection {
   limiter: RateLimiter;
 }
 
+export interface SessionEvent {
+  type: 'connected' | 'disconnected' | 'expired';
+  // public session id
+  sessionId: string;
+}
+
 export type MessageHandler = (
   connection: Connection & { session: Session },
   data: unknown,
@@ -38,6 +44,7 @@ export class RealtimeGateway
   private readonly bySession = new Map<string, Connection>();
   private readonly handlers = new Map<string, MessageHandler>();
   private sweeper?: NodeJS.Timeout;
+  private readonly sessionListeners: ((event: SessionEvent) => void)[] = [];
 
   // Injectable clock so tests don't have to wait real seconds.
   clock: () => number = () => Date.now();
@@ -45,7 +52,11 @@ export class RealtimeGateway
   constructor(
     private readonly httpAdapterHost: HttpAdapterHost,
     private readonly sessions: SessionService,
-  ) {}
+  ) {
+    this.sessions.onExpire((sessionId) =>
+      this.announce({ type: 'expired', sessionId }),
+    );
+  }
 
   onApplicationBootstrap(): void {
     const server = this.httpAdapterHost.httpAdapter.getHttpServer();
@@ -66,6 +77,11 @@ export class RealtimeGateway
   // Feature modules (rooms, match…) plug their message types in here.
   registerHandler(type: string, handler: MessageHandler): void {
     this.handlers.set(type, handler);
+  }
+
+  // Feature modules (rooms…) learn when a player connects, drops or expires.
+  onSessionEvent(listener: (event: SessionEvent) => void): void {
+    this.sessionListeners.push(listener);
   }
 
   sendTo(sessionId: string, t: string, d?: unknown): void {
@@ -137,7 +153,15 @@ export class RealtimeGateway
     if (!handler) {
       return this.sendError(connection, ERROR.BAD_MESSAGE);
     }
-    handler({ ...connection, session }, envelope.d);
+    try {
+      handler({ ...connection, session }, envelope.d);
+    } catch (error) {
+      // a bug in one handler must not take the whole server down
+      this.logger.error(
+        `handler "${envelope.t}" failed: ${(error as Error).message}`,
+      );
+      this.sendError(connection, ERROR.INTERNAL_ERROR);
+    }
   }
 
   private onHello(connection: Connection, envelope: Envelope): void {
@@ -169,6 +193,7 @@ export class RealtimeGateway
     this.bySession.set(session.sessionId, connection);
     this.logger.log(`${session.nickname} connected (${session.sessionId})`);
     this.send(connection.socket, 'welcome', this.sessions.toPublic(session));
+    this.announce({ type: 'connected', sessionId: session.sessionId });
   }
 
   private onClose(connection: Connection): void {
@@ -177,6 +202,19 @@ export class RealtimeGateway
     if (session && this.bySession.get(session.sessionId) === connection) {
       this.bySession.delete(session.sessionId);
       this.sessions.markDisconnected(session.token);
+      this.announce({ type: 'disconnected', sessionId: session.sessionId });
+    }
+  }
+
+  private announce(event: SessionEvent): void {
+    for (const listener of this.sessionListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.logger.error(
+          `session listener failed: ${(error as Error).message}`,
+        );
+      }
     }
   }
 

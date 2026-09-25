@@ -27,6 +27,13 @@ export class SessionService {
 
   private readonly sessionsByToken = new Map<string, Session>();
   private readonly disconnectedAt = new Map<string, number>();
+  private readonly expiryListeners: ((sessionId: string) => void)[] = [];
+
+  // Told (with the public session id) whenever a session ends for good, so
+  // rooms can free the seat. Fires from resume() and from purgeExpired().
+  onExpire(listener: (sessionId: string) => void): void {
+    this.expiryListeners.push(listener);
+  }
 
   create(nickname: string): Session {
     const session: Session = {
@@ -64,8 +71,11 @@ export class SessionService {
       return { status: 'expired' };
     }
     const droppedAt = this.disconnectedAt.get(token);
-    if (droppedAt !== undefined && this.clock() - droppedAt > RECONNECT_GRACE_MS) {
-      this.remove(token);
+    if (
+      droppedAt !== undefined &&
+      this.clock() - droppedAt > RECONNECT_GRACE_MS
+    ) {
+      this.expire(token);
       return { status: 'expired' };
     }
     this.disconnectedAt.delete(token);
@@ -83,10 +93,18 @@ export class SessionService {
         if (session) {
           removed.push(session.sessionId);
         }
-        this.remove(token);
+        this.expire(token);
       }
     }
     return removed;
+  }
+
+  private expire(token: string): void {
+    const session = this.sessionsByToken.get(token);
+    this.remove(token);
+    if (session) {
+      this.expiryListeners.forEach((listener) => listener(session.sessionId));
+    }
   }
 
   private remove(token: string): void {

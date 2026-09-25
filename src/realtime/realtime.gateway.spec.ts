@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { SessionModule } from '../session/session.module';
 import { SessionService } from '../session/session.service';
+import { RealtimeGateway } from './realtime.gateway';
 import { RealtimeModule } from './realtime.module';
 import { connect, sleep, startApp, TestClient } from './realtime-test-utils';
 
@@ -129,5 +130,83 @@ describe('Realtime gateway handshake', () => {
     const error = await client.next('error');
 
     expect(error.d).toEqual({ code: 'not_authenticated' });
+  });
+});
+
+describe('Realtime gateway robustness', () => {
+  let app: INestApplication;
+  let url: string;
+  let sessions: SessionService;
+  let gateway: RealtimeGateway;
+  const clients: TestClient[] = [];
+
+  beforeEach(async () => {
+    ({ app, url } = await startApp([SessionModule, RealtimeModule]));
+    sessions = app.get(SessionService);
+    gateway = app.get(RealtimeGateway);
+  });
+
+  afterEach(async () => {
+    clients.splice(0).forEach((c) => c.socket.terminate());
+    await app.close();
+  });
+
+  const login = async () => {
+    const session = sessions.create('ZE');
+    const client = await connect(url);
+    clients.push(client);
+    client.send({ t: 'hello', d: { token: session.token } });
+    await client.next('welcome');
+    return { session, client };
+  };
+
+  it('a handler that throws answers internal_error and the connection survives', async () => {
+    gateway.registerHandler('boom', () => {
+      throw new Error('bug in a handler');
+    });
+    const { client } = await login();
+
+    client.send({ t: 'boom' });
+    const error = await client.next('error');
+    client.send({ t: 'ping' });
+
+    expect(error.d).toEqual({ code: 'internal_error' });
+    expect((await client.next('pong')).t).toBe('pong');
+  });
+
+  it('session events: connected, disconnected and expired are announced', async () => {
+    const events: string[] = [];
+    gateway.onSessionEvent((e) => events.push(`${e.type}:${e.sessionId}`));
+    const { session, client } = await login();
+    let now = Date.now();
+    sessions.clock = () => now;
+
+    client.socket.terminate();
+    await sleep(100);
+    now += 61_000;
+    gateway.sweep();
+
+    expect(events).toEqual([
+      `connected:${session.sessionId}`,
+      `disconnected:${session.sessionId}`,
+      `expired:${session.sessionId}`,
+    ]);
+  });
+
+  it('an expired session that says hello is announced as expired too', async () => {
+    const events: string[] = [];
+    gateway.onSessionEvent((e) => events.push(e.type));
+    const session = sessions.create('ZE');
+    let now = Date.now();
+    sessions.clock = () => now;
+    sessions.markDisconnected(session.token);
+    now += 61_000;
+
+    const client = await connect(url);
+    clients.push(client);
+    client.send({ t: 'hello', d: { token: session.token } });
+    await client.closed;
+
+    expect(events).toEqual(['expired']);
   });
 });

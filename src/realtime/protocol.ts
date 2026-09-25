@@ -16,6 +16,7 @@ export const CLOSE = {
 export const ERROR = {
   BAD_MESSAGE: 'bad_message',
   NOT_AUTHENTICATED: 'not_authenticated',
+  INTERNAL_ERROR: 'internal_error',
 } as const;
 
 // Returns null for anything that is not a JSON object with a string "t".
