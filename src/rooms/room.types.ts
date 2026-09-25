@@ -48,7 +48,10 @@ export type RoomEvent =
   | { type: 'updated'; room: RoomView }
   | { type: 'deleted'; code: string }
   | { type: 'started'; room: RoomView }
-  | { type: 'kicked'; code: string; sessionId: string };
+  | { type: 'kicked'; code: string; sessionId: string }
+  // the match listens to these two to fill or free seats
+  | { type: 'member_added'; code: string; sessionId: string }
+  | { type: 'member_removed'; code: string; sessionId: string };
 
 export const ROOM_ERROR_MESSAGES = {
   invalid_settings: 'invalid settings',

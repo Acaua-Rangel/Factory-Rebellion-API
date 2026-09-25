@@ -40,7 +40,13 @@ describe('RoomsService', () => {
     limiter = new JoinLimiter();
     rooms = new RoomsService(limiter);
     events = [];
-    rooms.onEvent((event) => events.push(event));
+    // member_added / member_removed are for the match and have their own spec
+    // (room-match-hooks.spec.ts); here we look at what players get to see
+    rooms.onEvent((event) => {
+      if (event.type !== 'member_added' && event.type !== 'member_removed') {
+        events.push(event);
+      }
+    });
   });
 
   // fills a room up to its size with fresh players p1..pN (creator first)

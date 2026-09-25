@@ -174,6 +174,17 @@ export class RoomsService {
     return room;
   }
 
+  // The match is over: same members, same host, ready to start again
+  // (AC-045, ASM-010).
+  returnToLobby(code: string): void {
+    const room = this.rooms.get(code);
+    if (!room || room.phase !== 'match') {
+      return;
+    }
+    room.phase = 'lobby';
+    this.emit({ type: 'updated', room: this.viewOf(room) });
+  }
+
   // The host removes a member from the lobby and bans them from this room
   // (AC-073, AC-074). The ban lasts as long as the room exists (ASM-028).
   kick(hostSessionId: string, targetSessionId: string): void {
@@ -238,6 +249,11 @@ export class RoomsService {
       connected: true,
     });
     this.roomByMember.set(session.sessionId, room.code);
+    this.emit({
+      type: 'member_added',
+      code: room.code,
+      sessionId: session.sessionId,
+    });
     this.emit({ type: 'updated', room: this.viewOf(room) });
   }
 
@@ -250,6 +266,7 @@ export class RoomsService {
     }
     room.members = room.members.filter((m) => m.sessionId !== sessionId);
     this.roomByMember.delete(sessionId);
+    this.emit({ type: 'member_removed', code: room.code, sessionId });
 
     if (room.members.length === 0) {
       this.rooms.delete(room.code);
