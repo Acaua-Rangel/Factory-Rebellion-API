@@ -167,6 +167,7 @@ export class RealtimeGateway
 
     connection.session = session;
     this.bySession.set(session.sessionId, connection);
+    this.logger.log(`${session.nickname} connected (${session.sessionId})`);
     this.send(connection.socket, 'welcome', this.sessions.toPublic(session));
   }
 
