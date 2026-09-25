@@ -25,8 +25,19 @@ describe('Snapshots', () => {
     match.tick(START_MS);
     sim = new Simulation(physics);
     for (const p of match.view().players) sim.add(p.sessionId, p.position);
-    for (let i = 0; i < 90; i++)
-      for (const p of roster) sim.step(p.sessionId, true);
+    // a real client sends an input every frame, even standing still: settle the
+    // bodies the same way (neutral inputs), then let the numbering start over
+    for (const p of roster) {
+      for (let batch = 0; batch < 3; batch++) {
+        sim.enqueue(p.sessionId, {
+          inputs: Array.from({ length: 30 }, (_, i) => ({
+            seq: batch * 30 + i + 1,
+          })),
+        });
+        for (let f = 0; f < 30; f++) sim.step(p.sessionId, true);
+      }
+      sim.resync(p.sessionId);
+    }
   });
 
   const snapshot = () => buildSnapshot(match.view(), sim);

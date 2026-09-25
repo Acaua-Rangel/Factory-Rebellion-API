@@ -1,5 +1,5 @@
 import { loadMap } from './map';
-import { HOLD_FRAMES, MAX_BATCH, MAX_QUEUE, Simulation } from './simulation';
+import { MAX_BATCH, MAX_QUEUE, Simulation } from './simulation';
 import { Physics } from './physics';
 
 const map = loadMap();
@@ -161,34 +161,58 @@ describe('Simulation (inputs to movement, one frame at a time)', () => {
 
     expect(accepted).toBe(MAX_QUEUE);
     frames(500);
-    // the 30 queued inputs, then the held key for HOLD_FRAMES, then nothing
-    expect(x()).toBe(spawn.x + (MAX_QUEUE + HOLD_FRAMES) * 4);
+    // exactly the queued inputs, one per frame, and nothing more
+    expect(x()).toBe(spawn.x + MAX_QUEUE * 4);
   });
 
-  it('when an input is late, the held keys are repeated for a few frames, then released', () => {
+  it('AC-060: when an input is late the player waits: no movement, no physics, nothing repeated @spec:AC-060', () => {
     send([key(1, { r: 1 })]);
+    frames(1);
+    const afterOne = {
+      x: x(),
+      y: sim.bodyOf('ana')!.y,
+      vspd: sim.bodyOf('ana')!.vspd,
+    };
 
-    frames(1 + HOLD_FRAMES + 20);
+    frames(30); // nothing arrives for half a second
 
-    expect(x()).toBe(spawn.x + 4 * (1 + HOLD_FRAMES));
+    expect(x()).toBe(afterOne.x);
+    expect(sim.bodyOf('ana')!.y).toBe(afterOne.y);
+    expect(sim.bodyOf('ana')!.vspd).toBe(afterOne.vspd);
+    expect(sim.ackOf('ana')).toBe(1);
   });
 
-  it('a late input never repeats a jump: the physics is given jump=false on repeated frames', () => {
-    const physics = new Physics(map);
-    const seen: boolean[] = [];
-    const real = physics.step.bind(physics);
-    jest.spyOn(physics, 'step').mockImplementation((body, input) => {
-      seen.push(input.jump);
-      real(body, input);
-    });
-    const spied = new Simulation(physics);
-    spied.add('ana', spawn);
-    spied.enqueue('ana', { inputs: [{ seq: 1, j: 1, r: 1 }] });
+  it('AC-060: the position after input N is the same whatever the timing of the network @spec:AC-060', () => {
+    // the same 12 inputs arrive all at once, in a trickle, and with long gaps
+    // in between: where the player ends up must be identical
+    const inputs = [
+      ...Array.from({ length: 5 }, (_, i) => key(i + 1, { r: 1 })),
+      key(6, { r: 1, j: 1 }),
+      ...Array.from({ length: 5 }, (_, i) => key(i + 7, { r: 1 })),
+      key(12),
+    ];
+    const play = (schedule: (frame: number) => unknown[]) => {
+      const local = new Simulation(new Physics(map));
+      local.add('p', spawn);
+      for (let f = 0; f < 80; f++) local.step('p', true); // settle
+      for (let f = 0; f < 200; f++) {
+        const batch = schedule(f);
+        if (batch.length) local.enqueue('p', { inputs: batch });
+        local.step('p', true);
+      }
+      const body = local.bodyOf('p')!;
+      return { x: body.x, y: body.y, vspd: body.vspd, ack: local.ackOf('p') };
+    };
 
-    for (let i = 0; i < 4; i++) spied.step('ana', true);
+    const allAtOnce = play((f) => (f === 0 ? inputs : []));
+    const trickle = play((f) => (f < 12 ? [inputs[f]] : []));
+    const gaps = play((f) =>
+      f % 7 === 0 && f / 7 < 12 ? [inputs[f / 7]] : [],
+    );
 
-    // frame 1 has the real input (jump), frames 2-4 repeat the held keys without it
-    expect(seen).toEqual([true, false, false, false]);
+    expect(allAtOnce.ack).toBe(12);
+    expect(trickle).toEqual(allAtOnce);
+    expect(gaps).toEqual(allAtOnce);
   });
 
   it('a player who cannot move ignores their inputs but they are acknowledged, and they do not fall or drift', () => {

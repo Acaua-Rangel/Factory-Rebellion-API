@@ -6,11 +6,6 @@ import { Point } from './match.types';
 // this stops a client from banking extra speed by sending inputs early.
 export const MAX_QUEUE = 30;
 export const MAX_BATCH = 30;
-// When the next input is late the held keys are repeated this many frames
-// (100 ms), then released.
-export const HOLD_FRAMES = 6;
-
-const NO_KEYS: Input = { left: false, right: false, jump: false, down: false };
 
 interface QueuedInput extends Input {
   seq: number;
@@ -22,8 +17,6 @@ interface PlayerSim {
   // highest input number accepted / last input number applied
   lastQueued: number;
   ack: number;
-  last: Input;
-  starved: number;
 }
 
 const isKey = (value: unknown): boolean => value === true || value === 1;
@@ -55,8 +48,6 @@ export class Simulation {
       queue: [],
       lastQueued: previous?.lastQueued ?? 0,
       ack: previous?.ack ?? 0,
-      last: NO_KEYS,
-      starved: HOLD_FRAMES + 1,
     });
   }
 
@@ -139,21 +130,18 @@ export class Simulation {
       return;
     }
 
+    // No input for this frame (it is late): the player waits. Nothing moves and
+    // nothing is repeated, so the body is always exactly the result of the inputs
+    // applied so far, in order. That is what lets the client compare its own
+    // prediction at input N with the server's position at input N (AC-060), and
+    // it means a laggy or bursty connection can delay a player but never make
+    // them faster.
     const next = player.queue.shift();
-    let input: Input;
-    if (next) {
-      player.ack = next.seq;
-      player.last = next;
-      player.starved = 0;
-      input = next;
-    } else {
-      player.starved++;
-      // a late input keeps the held keys for a moment but never jumps again
-      input =
-        player.starved <= HOLD_FRAMES
-          ? { ...player.last, jump: false }
-          : NO_KEYS;
+    if (!next) {
+      return;
     }
+    player.ack = next.seq;
+    const input: Input = next;
     this.physics.step(player.body, input);
   }
 }

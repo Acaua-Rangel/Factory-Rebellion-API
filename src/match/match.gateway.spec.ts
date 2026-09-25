@@ -491,8 +491,10 @@ describe('Match messages over the WebSocket', () => {
         cheater.session.sessionId,
       );
 
+      // the claimed x=12 / y=34 changed nothing: the one real input (no keys)
+      // only let gravity act for a frame
       expect(after.x).toBe(before.x);
-      expect(after.y).toBeCloseTo(before.y, 1);
+      expect(Math.abs(after.y - before.y)).toBeLessThan(1);
       expect(
         cheater.client.messages.some(
           (m) => m.t === 'error' && m.d.code === 'bad_message',
