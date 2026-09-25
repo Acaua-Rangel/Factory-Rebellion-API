@@ -287,6 +287,67 @@ describe('Match messages over the WebSocket', () => {
     expect(state.d).toEqual({ view: null });
   });
 
+  it('P-003: nothing a client sends can change the match: the server is the only judge @principle:P-003', async () => {
+    const { all, code } = await startMatch();
+    matches.tick(START_MS);
+    // the real 60 Hz clock keeps running during the test: compare all but the clock
+    const withoutClock = () => {
+      const { timeLeftMs, ...rest } = matches.getMatch(code)!.view();
+      return { clockRunning: typeof timeLeftMs === 'number', ...rest };
+    };
+    const before = withoutClock();
+    const cheater = all[0].client;
+
+    // a client claiming results, scores, life, machines, positions or a new phase
+    const forged = [
+      {
+        t: 'match.round_ended',
+        d: {
+          winner: 'workers',
+          reason: 'machines',
+          score: { workers: 9, capatazes: 0 },
+        },
+      },
+      {
+        t: 'match.ended',
+        d: {
+          winner: 'workers',
+          reason: 'score',
+          score: { workers: 9, capatazes: 0 },
+        },
+      },
+      {
+        t: 'match.state',
+        d: { view: { phase: 'finished', score: { workers: 9, capatazes: 0 } } },
+      },
+      { t: 'match.round_started', d: { round: 99, suddenDeath: true } },
+      { t: 'match.sudden_death', d: {} },
+      { t: 'match.player_down', d: { sessionId: all[1].session.sessionId } },
+      { t: 'machine.broken', d: { id: 'machine1' } },
+      { t: 'player.life', d: { life: 999 } },
+      { t: 'player.position', d: { x: 1, y: 1 } },
+      { t: 'room.started', d: { code } },
+      {
+        t: 'match.sync',
+        d: {
+          view: { score: { workers: 9, capatazes: 0 } },
+          score: { workers: 9, capatazes: 0 },
+        },
+      },
+    ];
+    for (const message of forged) cheater.send(message);
+    await sleep(150);
+
+    const errors = cheater.messages.filter((m) => m.t === 'error');
+    // every forged message except the harmless sync was refused as unknown
+    expect(errors).toHaveLength(forged.length - 1);
+    expect(errors.every((e) => e.d.code === 'bad_message')).toBe(true);
+    // match.sync is answered with the REAL state, whatever the client claimed
+    const answered = await cheater.next('match.state');
+    expect(answered.d.view.score).toEqual({ workers: 0, capatazes: 0 });
+    expect(withoutClock()).toEqual(before);
+  });
+
   it('AC-005: no message of the whole match ever carries a session token @spec:AC-005 @principle:P-005', async () => {
     const { all, code } = await startMatch();
     matches.tick(START_MS);
